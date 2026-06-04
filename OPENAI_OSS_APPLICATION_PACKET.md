@@ -22,11 +22,11 @@ Role: Primary maintainer, if you own and publish this repository.
 
 First name:
 
-`Veektall`
+`Victor`
 
 Last name:
 
-`https://github.com/Veektall/LightWorship`
+`Simpa Ojo`
 
 Email:
 
@@ -34,11 +34,11 @@ Email:
 
 GitHub username:
 
-`TODO`
+`Veektall`
 
 GitHub repository URL:
 
-`TODO`
+`https://github.com/Veektall/LightWorship`
 
 Describe your role:
 
@@ -68,9 +68,9 @@ Anything else we should know? Maximum 500 characters.
 ## Before Submitting
 
 - [x] Create a public GitHub repository.
-- [ ] Commit only source/docs/safe sample data.
-- [ ] Confirm no API keys are committed.
-- [ ] Confirm repository visibility is public.
+- [x] Commit only source/docs/safe sample data.
+- [x] Confirm no API keys are committed.
+- [x] Confirm repository visibility is public.
 - [ ] Confirm GitHub profile visibility is public.
 - [ ] Get OpenAI Organization ID.
 - [ ] Fill the official form only at `openai.com/form/codex-for-oss/`.
