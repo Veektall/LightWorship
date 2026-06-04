@@ -1,8 +1,10 @@
 # LightWorship
 
-LightWorship is a planned lightweight worship projection application for Windows 7 SP1 and newer.
+[![CI](https://github.com/Veektall/LightWorship/actions/workflows/ci.yml/badge.svg)](https://github.com/Veektall/LightWorship/actions/workflows/ci.yml)
 
-Phase 1 focuses on the stable projection core:
+LightWorship is a lightweight worship projection application for Windows 7 SP1 and newer.
+
+The current public release focuses on the stable projection core:
 
 - Bible scripture search and projection
 - Song lyric library and projection
@@ -14,7 +16,7 @@ Phase 1 focuses on the stable projection core:
 
 AI listening supports Deepgram Nova streaming, Gemini Live, Windows Speech, and local Whisper. For real worship-service transcription accuracy, Deepgram is the recommended engine.
 
-See `BUILD_CHECKLIST.md` for the live build tracker.
+See `BUILD_CHECKLIST.md` for the live build tracker and `ROADMAP.md` for the maintainer roadmap.
 
 ## Current Development Stack
 
@@ -23,6 +25,12 @@ See `BUILD_CHECKLIST.md` for the live build tracker.
 - Local JSON storage for the v0.1 test build
 - MSBuild from Visual Studio Build Tools
 - Inno Setup for packaging
+
+## Support
+
+LightWorship is maintained as a zero-cost tool for churches and small community teams. If it helps you, support maintenance through GitHub Sponsors when available or USDC on Base:
+
+`0x8f1c1108e339be9adf77baf1eb44232d956cb7b7`
 
 ## Test Build
 

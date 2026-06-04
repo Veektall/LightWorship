@@ -1,0 +1,24 @@
+name: Feature request
+description: Suggest a LightWorship improvement.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What workflow would this improve?
+      description: Describe the worship-service or projection workflow.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Proposed behavior
+      description: What should LightWorship do?
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      description: Mention Windows version, offline needs, licensing limits, or hardware constraints.

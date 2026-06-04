@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-test:
+    name: Build and test
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Restore packages
+        run: nuget restore LightWorship.sln
+
+      - name: Build
+        run: msbuild LightWorship.sln /t:Build /p:Configuration=Debug /p:Platform="Any CPU" /nologo
+
+      - name: Run tests
+        run: .\tests\LightWorship.Tests\bin\Debug\LightWorship.Tests.exe

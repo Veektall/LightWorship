@@ -1,0 +1,31 @@
+name: Bug report
+description: Report a LightWorship problem.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the projection, scripture, schedule, media, or listening issue.
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 10, Windows 11, Windows 7 SP1
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: 1. Open... 2. Search... 3. Project...
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Logs or notes
+      description: Include non-sensitive logs, screenshots, or setup details.
