@@ -1,0 +1,1 @@
+Build the temporary Windows 7 SermonScribe launcher with Python 3.8 x86.
