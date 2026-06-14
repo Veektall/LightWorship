@@ -1,0 +1,1 @@
+Trigger the Windows 7 launcher artifact after robust source restore.
