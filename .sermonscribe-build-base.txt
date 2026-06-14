@@ -1,3 +1,2 @@
 Temporary build anchor for the Windows 7 SermonScribe launcher.
-Build requested 2026-06-14.
-Python 3.8 artifact preparation.
+Updated for the isolated Python 3.8 build branch; remove after artifact retrieval.
