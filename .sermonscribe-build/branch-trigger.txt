@@ -1,0 +1,1 @@
+Trigger one-time SermonScribe Windows 7 launcher build.
