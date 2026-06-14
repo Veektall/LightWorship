@@ -40,3 +40,5 @@ jobs:
           path: dist/Start SermonScribe.exe
           retention-days: 3
           if-no-files-found: error
+
+# Temporary synchronization change to trigger the verified Windows 7 build.
