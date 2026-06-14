@@ -17,18 +17,21 @@ jobs:
         with:
           python-version: '3.8.10'
           architecture: 'x86'
-      - name: Restore launcher source
+      - name: Restore complete launcher and server sources
         shell: pwsh
         run: |
           python -c "import gzip,base64,pathlib; pathlib.Path('start_sermonscribe.py').write_bytes(gzip.decompress(base64.b64decode(pathlib.Path('.sermonscribe-build/source.b64').read_text().strip())))"
-          python -m py_compile start_sermonscribe.py
-      - name: Build launcher
+          Get-Content .sermonscribe-build/server.00.b64,.sermonscribe-build/server.01.b64,.sermonscribe-build/server.02.b64,.sermonscribe-build/server.03.b64 -Raw | Set-Content -NoNewline server-combined.b64
+          python -c "import gzip,base64,pathlib; pathlib.Path('sermonscribe_server.py').write_bytes(gzip.decompress(base64.b64decode(pathlib.Path('server-combined.b64').read_text().strip())))"
+          python -m py_compile start_sermonscribe.py sermonscribe_server.py
+          python -c "import ast,pathlib; tree=ast.parse(pathlib.Path('start_sermonscribe.py').read_text()); names={n.names[0].name for n in ast.walk(tree) if isinstance(n,ast.Import)}; assert 'ctypes' not in names"
+      - name: Build launcher with full server dependency graph
         shell: pwsh
         run: |
           python -m pip install --upgrade "pip<25"
           python -m pip install "pyinstaller==5.13.2"
           python -m PyInstaller --noconfirm --clean --onefile --console --name "Start SermonScribe" start_sermonscribe.py
-      - name: Verify PE32 launcher
+      - name: Verify PE32 launcher and bundled modules
         shell: pwsh
         run: |
           $path = "dist/Start SermonScribe.exe"
@@ -37,6 +40,8 @@ jobs:
           $pe = [BitConverter]::ToInt32($bytes, 0x3c)
           $machine = [BitConverter]::ToUInt16($bytes, $pe + 4)
           if ($machine -ne 0x14c) { throw ("Expected PE32 x86, got 0x{0:X}" -f $machine) }
+          if (Select-String -Path build/'Start SermonScribe'/warn-'Start SermonScribe'.txt -Pattern 'missing module named json' -Quiet) { throw "json was not bundled" }
+          Get-Item $path | Format-List Name,Length,LastWriteTime
       - uses: actions/upload-artifact@v4
         with:
           name: sermon-scribe-win7-launcher
