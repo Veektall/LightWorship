@@ -1,0 +1,1 @@
+Trigger the one-time Windows 7 launcher build after the trusted CI workflow was updated on main.
