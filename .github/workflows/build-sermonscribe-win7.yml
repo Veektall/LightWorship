@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/build-sermonscribe-win7.yml'
+      - 'build/sermonscribe-win7/**'
 
 permissions:
   contents: read
@@ -20,9 +21,8 @@ jobs:
       - name: Restore launcher source
         shell: pwsh
         run: |
-          python -c "import gzip,base64,pathlib; pathlib.Path('start_sermonscribe.py').write_bytes(gzip.decompress(base64.b64decode(pathlib.Path('.sermonscribe-build/source.b64').read_text().strip())))"
+          python -c "import base64,gzip,pathlib; b=pathlib.Path(r'build/sermonscribe-win7/source.b64').read_text().strip(); pathlib.Path('start_sermonscribe.py').write_bytes(gzip.decompress(base64.b64decode(b))); print('restored',pathlib.Path('start_sermonscribe.py').stat().st_size,'bytes')"
           python -m py_compile start_sermonscribe.py
-          python --version
       - name: Build 32-bit Python 3.8 launcher
         shell: pwsh
         run: |
@@ -38,5 +38,5 @@ jobs:
         with:
           name: sermonscribe-win7-launcher
           path: dist/Start SermonScribe.exe
-          retention-days: 3
+          retention-days: 1
           if-no-files-found: error
