@@ -17,11 +17,12 @@ jobs:
         with:
           python-version: '3.8.10'
           architecture: 'x86'
-      - name: Restore launcher source from build branch
+      - name: Restore launcher source
         shell: pwsh
         run: |
-          python -c "import re,base64,gzip,pathlib; s=pathlib.Path('.github/workflows/build-sermonscribe-win7.yml').read_text(encoding='utf-8'); b=re.search(r'(?m)^([A-Za-z0-9+/]{100,}={0,2})$',s).group(1); pathlib.Path('start_sermonscribe.py').write_bytes(gzip.decompress(base64.b64decode(b))); print('restored',pathlib.Path('start_sermonscribe.py').stat().st_size,'bytes')"
+          python -c "import gzip,base64,pathlib; pathlib.Path('start_sermonscribe.py').write_bytes(gzip.decompress(base64.b64decode(pathlib.Path('.sermonscribe-build/source.b64').read_text().strip())))"
           python -m py_compile start_sermonscribe.py
+          python --version
       - name: Build 32-bit Python 3.8 launcher
         shell: pwsh
         run: |
@@ -37,5 +38,5 @@ jobs:
         with:
           name: sermonscribe-win7-launcher
           path: dist/Start SermonScribe.exe
-          retention-days: 1
+          retention-days: 3
           if-no-files-found: error
