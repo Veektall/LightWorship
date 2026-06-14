@@ -6,6 +6,9 @@ on:
     paths:
       - 'sermonscribe-win7/**'
       - '.github/workflows/build-sermonscribe-win7.yml'
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize]
   workflow_dispatch:
 
 permissions:
@@ -38,6 +41,10 @@ jobs:
         run: |
           python -m PyInstaller --noconfirm --clean --onefile --console --name "Start SermonScribe" start_sermonscribe.py
           if (!(Test-Path "dist/Start SermonScribe.exe")) { throw "Launcher was not produced" }
+          $bytes = [IO.File]::ReadAllBytes("dist/Start SermonScribe.exe")
+          $pe = [BitConverter]::ToInt32($bytes, 0x3c)
+          $machine = [BitConverter]::ToUInt16($bytes, $pe + 4)
+          if ($machine -ne 0x14c) { throw ("Expected PE32 x86, got 0x{0:X}" -f $machine) }
           Get-Item "dist/Start SermonScribe.exe" | Format-List Name,Length,LastWriteTime
       - name: Upload launcher
         uses: actions/upload-artifact@v4
