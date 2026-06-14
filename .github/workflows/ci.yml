@@ -10,22 +10,61 @@ jobs:
   build-test:
     name: Build and test
     runs-on: windows-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
-
       - name: Setup NuGet
         uses: NuGet/setup-nuget@v2
-
       - name: Restore packages
         run: nuget restore LightWorship.sln
-
       - name: Build
         run: msbuild LightWorship.sln /t:Build /p:Configuration=Debug /p:Platform="Any CPU" /nologo
-
       - name: Run tests
         run: .\tests\LightWorship.Tests\bin\Debug\LightWorship.Tests.exe
+
+  sermonscribe-win7:
+    name: Build SermonScribe Windows 7 launcher
+    runs-on: windows-2022
+    steps:
+      - name: Checkout PR merge
+        uses: actions/checkout@v4
+      - name: Setup Python 3.8 x86
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.8.10'
+          architecture: 'x86'
+      - name: Restore and validate launcher source
+        shell: pwsh
+        run: |
+          python -c "import gzip,base64,pathlib; pathlib.Path('start_sermonscribe.py').write_bytes(gzip.decompress(base64.b64decode(pathlib.Path('.sermonscribe-build/source.b64').read_text().strip())))"
+          python -m py_compile start_sermonscribe.py
+          python --version
+      - name: Install PyInstaller
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade "pip<25"
+          python -m pip install "pyinstaller==5.13.2"
+      - name: Build launcher
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile --console --name "Start SermonScribe" start_sermonscribe.py
+          if (!(Test-Path "dist/Start SermonScribe.exe")) { throw "Launcher was not produced" }
+      - name: Verify PE32 executable
+        shell: pwsh
+        run: |
+          $file = Get-Item 'dist/Start SermonScribe.exe'
+          if ($file.Length -lt 1000000) { throw 'Launcher is unexpectedly small.' }
+          $bytes = [IO.File]::ReadAllBytes($file.FullName)
+          $pe = [BitConverter]::ToInt32($bytes, 0x3c)
+          $machine = [BitConverter]::ToUInt16($bytes, $pe + 4)
+          if ($machine -ne 0x14c) { throw ("Expected PE32 x86, got 0x{0:X}" -f $machine) }
+          Get-Item $file.FullName | Format-List Name,Length,LastWriteTime
+      - name: Upload launcher artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sermonscribe-win7-launcher
+          path: dist/Start SermonScribe.exe
+          if-no-files-found: error
+          retention-days: 3
