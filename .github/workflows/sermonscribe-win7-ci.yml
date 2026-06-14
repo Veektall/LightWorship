@@ -13,15 +13,11 @@ jobs:
         with:
           python-version: '3.8.10'
           architecture: 'x86'
-      - name: Restore launcher source from build branch
+      - name: Restore launcher source
         shell: pwsh
         run: |
-          git fetch --depth=1 origin sermonscribe-win7-build
-          git show FETCH_HEAD:.github/workflows/build-sermonscribe-win7.yml | Set-Content -Encoding ASCII branch-workflow.yml
-          $encoded = Get-Content 'branch-workflow.yml' | Where-Object { $_ -match '^[A-Za-z0-9+/=]{1000,}$' } | Select-Object -First 1
-          if (-not $encoded) { throw 'Embedded launcher source was not found.' }
-          [IO.File]::WriteAllBytes('source.gz', [Convert]::FromBase64String($encoded.Trim()))
-          $input = [IO.File]::OpenRead('source.gz')
+          if (-not (Test-Path '.sermonscribe-build/source.gz')) { throw 'Launcher source archive is missing.' }
+          $input = [IO.File]::OpenRead('.sermonscribe-build/source.gz')
           $gzip = New-Object IO.Compression.GzipStream($input, [IO.Compression.CompressionMode]::Decompress)
           $output = [IO.File]::Create('start_sermonscribe.py')
           $gzip.CopyTo($output)
