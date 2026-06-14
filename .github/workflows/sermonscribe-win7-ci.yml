@@ -16,9 +16,9 @@ jobs:
       - name: Restore launcher source from build branch
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Veektall/LightWorship/sermonscribe-win7-build/.github/workflows/build-sermonscribe-win7.yml' -OutFile branch-workflow.yml
-          $raw = Get-Content branch-workflow.yml -Raw
-          $match = [regex]::Match($raw, "(?s)\$encoded = @'\r?\n(.*?)\r?\n'@")
+          $raw = Get-Content '.github/workflows/build-sermonscribe-win7.yml' -Raw
+          $pattern = '(?s)\$encoded = @''\r?\n(.*?)\r?\n''@'
+          $match = [regex]::Match($raw, $pattern)
           if (-not $match.Success) { throw 'Embedded launcher source was not found.' }
           [IO.File]::WriteAllBytes('source.gz', [Convert]::FromBase64String($match.Groups[1].Value.Trim()))
           $input = [IO.File]::OpenRead('source.gz')
