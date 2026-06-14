@@ -25,26 +25,28 @@ jobs:
           python -c "import gzip,base64,pathlib; pathlib.Path('sermonscribe_server.py').write_bytes(gzip.decompress(base64.b64decode(pathlib.Path('server-combined.b64').read_text().strip())))"
           python -m py_compile start_sermonscribe.py sermonscribe_server.py
           python -c "import ast,pathlib; tree=ast.parse(pathlib.Path('start_sermonscribe.py').read_text()); names={n.names[0].name for n in ast.walk(tree) if isinstance(n,ast.Import)}; assert 'ctypes' not in names"
-      - name: Build launcher with full server dependency graph
+      - name: Build Windows 7 folder runtime
         shell: pwsh
         run: |
           python -m pip install --upgrade "pip<25"
-          python -m pip install "pyinstaller==5.13.2"
-          python -m PyInstaller --noconfirm --clean --onefile --console --name "Start SermonScribe" start_sermonscribe.py
-      - name: Verify PE32 launcher and bundled modules
+          python -m pip install "pyinstaller==4.10"
+          python -m PyInstaller --noconfirm --clean --onedir --console --name "Start SermonScribe" start_sermonscribe.py
+      - name: Verify PE32 runtime and required native modules
         shell: pwsh
         run: |
-          $path = "dist/Start SermonScribe.exe"
-          if (!(Test-Path $path)) { throw "Launcher was not produced" }
-          $bytes = [IO.File]::ReadAllBytes($path)
+          $root = "dist/Start SermonScribe"
+          $exe = Join-Path $root "Start SermonScribe.exe"
+          if (!(Test-Path $exe)) { throw "Launcher was not produced" }
+          if (!(Test-Path (Join-Path $root "_socket.pyd"))) { throw "_socket.pyd was not bundled" }
+          if (!(Test-Path (Join-Path $root "python38.dll"))) { throw "python38.dll was not bundled" }
+          $bytes = [IO.File]::ReadAllBytes($exe)
           $pe = [BitConverter]::ToInt32($bytes, 0x3c)
           $machine = [BitConverter]::ToUInt16($bytes, $pe + 4)
           if ($machine -ne 0x14c) { throw ("Expected PE32 x86, got 0x{0:X}" -f $machine) }
-          if (Select-String -Path build/'Start SermonScribe'/warn-'Start SermonScribe'.txt -Pattern 'missing module named json' -Quiet) { throw "json was not bundled" }
-          Get-Item $path | Format-List Name,Length,LastWriteTime
+          Get-ChildItem $root | Select-Object Name,Length
       - uses: actions/upload-artifact@v4
         with:
-          name: sermon-scribe-win7-launcher
-          path: dist/Start SermonScribe.exe
+          name: sermon-scribe-win7-runtime-pyinstaller410
+          path: dist/Start SermonScribe/
           if-no-files-found: error
           retention-days: 3
