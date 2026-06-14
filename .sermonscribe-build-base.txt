@@ -1,1 +1,2 @@
-Temporary build anchor for the Windows 7 SermonScribe launcher. This file will be removed after the build.
+Temporary build anchor for the Windows 7 SermonScribe launcher.
+Build requested 2026-06-14.
