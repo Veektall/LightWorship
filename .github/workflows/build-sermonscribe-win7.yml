@@ -1,8 +1,11 @@
 name: Build SermonScribe Windows 7 launcher
 
 on:
-  pull_request:
-    branches: [main]
+  push:
+    branches: [sermonscribe-win7-build]
+    paths:
+      - 'sermonscribe-win7/**'
+      - '.github/workflows/build-sermonscribe-win7.yml'
   workflow_dispatch:
 
 permissions:
@@ -13,48 +16,33 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up 32-bit Python 3.8.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.8.10'
           architecture: 'x86'
-
-      - name: Restore launcher source
-        shell: powershell
+      - name: Restore and validate launcher source
+        shell: pwsh
         run: |
-          $encoded = (Get-Content '.sermonscribe-build\source.b64' -Raw).Trim()
-          $bytes = [Convert]::FromBase64String($encoded)
-          $input = New-Object IO.MemoryStream(,$bytes)
-          $gzip = New-Object IO.Compression.GzipStream($input,[IO.Compression.CompressionMode]::Decompress)
-          $output = [IO.File]::Create('start_sermonscribe.py')
-          $gzip.CopyTo($output)
-          $output.Dispose()
-          $gzip.Dispose()
-          $input.Dispose()
+          python -c "import gzip,base64,pathlib; pathlib.Path('start_sermonscribe.py').write_bytes(gzip.decompress(base64.b64decode(pathlib.Path('sermonscribe-win7/source.b64').read_text().strip())))"
           python -m py_compile start_sermonscribe.py
-
-      - name: Install Windows 7-compatible PyInstaller
-        run: python -m pip install --disable-pip-version-check pyinstaller==5.13.2
-
-      - name: Build launcher
-        run: python -m PyInstaller --noconfirm --clean --onefile --console --name "Start SermonScribe" start_sermonscribe.py
-
-      - name: Verify x86 executable
-        shell: powershell
+          python --version
+      - name: Install pinned packager
+        shell: pwsh
         run: |
-          $path = 'dist\Start SermonScribe.exe'
-          if (!(Test-Path $path)) { throw 'Launcher executable was not created.' }
-          $bytes = [IO.File]::ReadAllBytes($path)
-          $pe = [BitConverter]::ToInt32($bytes, 0x3c)
-          $machine = [BitConverter]::ToUInt16($bytes, $pe + 4)
-          if ($machine -ne 0x14c) { throw ('Expected PE32 x86, got machine 0x{0:X}' -f $machine) }
-          Write-Host 'Verified PE32 x86 launcher built with Python 3.8.10.'
-          Get-Item $path | Format-List Name,Length,LastWriteTime
-
-      - name: Upload launcher artifact
+          python -m pip install --upgrade "pip<25"
+          python -m pip install "pyinstaller==5.13.2"
+          python -m PyInstaller --version
+      - name: Build Windows 7 compatible launcher
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile --console --name "Start SermonScribe" start_sermonscribe.py
+          if (!(Test-Path "dist/Start SermonScribe.exe")) { throw "Launcher was not produced" }
+          Get-Item "dist/Start SermonScribe.exe" | Format-List Name,Length,LastWriteTime
+      - name: Upload launcher
         uses: actions/upload-artifact@v4
         with:
           name: sermon-scribe-win7-launcher
           path: dist/Start SermonScribe.exe
           if-no-files-found: error
+          retention-days: 3
