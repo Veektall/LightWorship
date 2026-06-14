@@ -1,11 +1,8 @@
-name: Build SermonScribe Windows 7 launcher
+name: SermonScribe Win7 CI
 
 on:
   push:
     branches: [sermonscribe-win7-build]
-    paths:
-      - 'sermonscribe-win7/**'
-      - '.github/workflows/build-sermonscribe-win7.yml'
   pull_request:
     branches: [main]
     types: [opened, reopened, synchronize]
@@ -24,23 +21,22 @@ jobs:
         with:
           python-version: '3.8.10'
           architecture: 'x86'
-      - name: Restore and validate launcher source
+      - name: Restore launcher source
         shell: pwsh
         run: |
-          python -c "import gzip,base64,pathlib; pathlib.Path('start_sermonscribe.py').write_bytes(gzip.decompress(base64.b64decode(pathlib.Path('sermonscribe-win7/source.b64').read_text().strip())))"
+          python -c "import gzip,base64,pathlib; pathlib.Path('start_sermonscribe.py').write_bytes(gzip.decompress(base64.b64decode(pathlib.Path('.sermonscribe-build/source.b64').read_text().strip())))"
           python -m py_compile start_sermonscribe.py
           python --version
-      - name: Install pinned packager
+      - name: Build 32-bit Python 3.8 launcher
         shell: pwsh
         run: |
           python -m pip install --upgrade "pip<25"
           python -m pip install "pyinstaller==5.13.2"
-          python -m PyInstaller --version
-      - name: Build Windows 7 compatible launcher
-        shell: pwsh
-        run: |
           python -m PyInstaller --noconfirm --clean --onefile --console --name "Start SermonScribe" start_sermonscribe.py
           if (!(Test-Path "dist/Start SermonScribe.exe")) { throw "Launcher was not produced" }
+      - name: Verify PE32 architecture
+        shell: pwsh
+        run: |
           $bytes = [IO.File]::ReadAllBytes("dist/Start SermonScribe.exe")
           $pe = [BitConverter]::ToInt32($bytes, 0x3c)
           $machine = [BitConverter]::ToUInt16($bytes, $pe + 4)
