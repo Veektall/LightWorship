@@ -15,13 +15,9 @@ concurrency:
 jobs:
   host-screenshots:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: dpm-sermon-studio-ui-loop
     steps:
       - uses: actions/checkout@v6
       - name: Extract UI shell source
-        working-directory: .
         run: |
           rm -rf dpm-sermon-studio-ui-loop
           mkdir -p dpm-sermon-studio-ui-loop
@@ -40,6 +36,7 @@ jobs:
       - name: Install SDK 36
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
       - name: Build and create screenshot baselines
+        working-directory: dpm-sermon-studio-ui-loop
         run: gradle :app:assembleDebug :app:updateDebugScreenshotTest :app:validateDebugScreenshotTest --stacktrace
       - name: Upload host screenshot report
         if: always()
@@ -54,13 +51,9 @@ jobs:
 
   emulator-flow:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: dpm-sermon-studio-ui-loop
     steps:
       - uses: actions/checkout@v6
       - name: Extract UI shell source
-        working-directory: .
         run: |
           rm -rf dpm-sermon-studio-ui-loop
           mkdir -p dpm-sermon-studio-ui-loop
