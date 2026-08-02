@@ -1,0 +1,1 @@
+Verdict: improved and usable as a review draft, but not yet release-ready. Strong artwork, metadata and safe mastering. Main remaining faults are incomplete editorial cleanup, residual 50 Hz hum, excessive loudness variation, and a conspicuous prayer level/timbre change. Recommended rebuild from untouched source with one final lossy encode.
