@@ -19,13 +19,13 @@ jobs:
           script: |
             const conclusion = context.payload.workflow_run.conclusion;
             const ok = conclusion === 'success';
-            const url = 'https://veektall.github.io/LightWorship/';
+            const url = 'https://raw.githack.com/Veektall/LightWorship/main/site/index.html';
             const title = ok ? 'nocturne-pages: deployment verified' : 'nocturne-pages: deployment failed';
             const body = [
               `Conclusion: ${conclusion}`,
               `Workflow run: ${context.payload.workflow_run.html_url}`,
               `Public URL: ${url}`,
-              ok ? 'The deployment workflow reconstructed the checksummed archive, validated app.js and the required content, deployed the Pages artifact, and fetched the public page successfully.' : 'The Pages workflow did not complete successfully; inspect the linked run.'
+              ok ? 'The deployment workflow reconstructed the checksummed archive, validated the HTML/CSS/JavaScript, published the static files, fetched all three public assets, and revalidated the live JavaScript.' : 'The static deployment workflow did not complete successfully; inspect the linked run.'
             ].join('\n\n');
             await github.rest.issues.create({
               owner: context.repo.owner,
