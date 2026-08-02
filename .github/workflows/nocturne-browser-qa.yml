@@ -29,7 +29,7 @@ jobs:
           SITE_URL: https://raw.githack.com/Veektall/LightWorship/main/site/index.html
         shell: bash
         run: |
-          cat > /tmp/nocturne-qa.mjs <<'JS'
+          cat > nocturne-qa.mjs <<'JS'
           import { chromium } from 'playwright';
 
           const url = process.env.SITE_URL;
@@ -86,7 +86,7 @@ jobs:
           if (fatal.length) throw new Error(`Browser console errors: ${fatal.join(' | ')}`);
           JS
           set +e
-          node /tmp/nocturne-qa.mjs > /tmp/nocturne-qa.log 2>&1
+          node ./nocturne-qa.mjs > /tmp/nocturne-qa.log 2>&1
           status=$?
           set -e
           cat /tmp/nocturne-qa.log
