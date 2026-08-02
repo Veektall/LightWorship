@@ -19,7 +19,7 @@ jobs:
           node-version: '22'
       - name: Diagnose live page
         env:
-          SITE_URL: https://cdn.jsdelivr.net/gh/Veektall/LightWorship@5a9f2c4c15f7e71628e297aa51f8898d563b307f/site/index.html
+          SITE_URL: https://htmlpreview.github.io/?https://github.com/Veektall/LightWorship/blob/5a9f2c4c15f7e71628e297aa51f8898d563b307f/site/index.html
         shell: bash
         run: |
           npm init -y >/dev/null 2>&1
@@ -36,7 +36,7 @@ jobs:
           page.on('pageerror', e => consoleMessages.push({ type: 'pageerror', text: e.message }));
           page.on('requestfailed', r => failedRequests.push({ url: r.url(), error: r.failure()?.errorText }));
           page.on('response', r => {
-            if (/index\.html|styles\.css|app\.js|three\.module|fonts\.googleapis|fonts\.gstatic/.test(r.url())) responses.push({ url: r.url(), status: r.status(), contentType: r.headers()['content-type'] });
+            if (/index\.html|styles\.css|app\.js|three\.module|fonts\.googleapis|fonts\.gstatic|htmlpreview/.test(r.url())) responses.push({ url: r.url(), status: r.status(), contentType: r.headers()['content-type'] });
           });
           const response = await page.goto(process.env.SITE_URL, { waitUntil: 'domcontentloaded', timeout: 120000 });
           await page.waitForTimeout(7000);
