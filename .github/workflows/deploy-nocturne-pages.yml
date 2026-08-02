@@ -24,12 +24,31 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Reconstruct and validate NOCTURNE
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p /tmp/nocturne-public
-          cat .pages/nocturne/chunk-* | base64 -d > /tmp/nocturne.tar.gz
-          sha256sum /tmp/nocturne.tar.gz
+          : > /tmp/chunk-01
+          for sha in \
+            f6de79e149284393d689aba86fb118bf1fe066ad \
+            42d239630c6b85b13dff8f27988e060444c29ce4 \
+            d52132493398a557f2e03ea56194fb973e82667a \
+            2b3681de1ff1c9cb4f7788a38847de6bb463312a \
+            7abde45179a22f5e94874cdd189126b5a6c51c7c \
+            00c9becb561ff1599a120bcf832b93afe2e16601 \
+            19458fa492dc4a4d38cadc183fb6177d546fb9c4 \
+            e78cfcf7ad8d51bff76ead27e7199f4d0d5ee172 \
+            6f617d2512018e8a7000aa5ec09eb0a828ecde3f \
+            c9bf96c9ab2aa8d8af97cbb74ba93032ed07fcaf \
+            c8efba1e370d550b0d0420758ef389a93b2ca47b \
+            7cea49c90b5ce33fac4875b9e02cf0558ee97ed4
+          do
+            gh api "repos/$GITHUB_REPOSITORY/git/blobs/$sha" --jq .content | tr -d '\n' | base64 -d >> /tmp/chunk-01
+          done
+          cat .pages/nocturne/chunk-00 /tmp/chunk-01 .pages/nocturne/chunk-02 .pages/nocturne/chunk-03 .pages/nocturne/chunk-04 | base64 -d > /tmp/nocturne.tar.gz
+          echo 'dbad5cb596fe34ea523a3f052fb3655f12fa1281ccd4a6e9fab263e693ac9034  /tmp/nocturne.tar.gz' | sha256sum -c -
           gzip -t /tmp/nocturne.tar.gz
           tar -xzf /tmp/nocturne.tar.gz -C /tmp/nocturne-public --strip-components=1
           node --check /tmp/nocturne-public/app.js
