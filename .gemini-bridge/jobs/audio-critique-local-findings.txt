@@ -1,0 +1,1 @@
+Measured final audio: 49:59.334, AAC stereo 48 kHz, 96 kbps. Integrated loudness -18.5 LUFS, true peak -1.6 dBFS, LRA 17.4 LU. Residual 50 Hz hum remains prominent in several sermon sections. Prayer insertion is roughly 10 dB louder than the preceding sermon. Multiple pidgin/audience-management lines remain after the initial cleanup. Local technical critique completed.
