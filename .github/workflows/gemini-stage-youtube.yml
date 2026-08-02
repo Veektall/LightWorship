@@ -1,31 +1,33 @@
 name: Gemini stage YouTube video
 
 on:
-  issues:
-    types: [opened]
+  push:
+    branches: [main]
+    paths:
+      - '.gemini-bridge/requests/*.json'
 
 permissions:
   contents: write
-  issues: write
 
 jobs:
   stage:
-    if: github.actor == github.repository_owner && startsWith(github.event.issue.title, 'gemini-stage-video:')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 2
 
-      - name: Parse job specification
+      - name: Find and parse job specification
         id: spec
-        env:
-          ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
-          python - <<'PY'
-          import json, os
-          spec = json.loads(os.environ['ISSUE_BODY'])
+          set -euo pipefail
+          SPEC_PATH=$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | grep '^.gemini-bridge/requests/.*\.json$' | head -n 1)
+          test -n "$SPEC_PATH"
+          python - "$SPEC_PATH" <<'PY'
+          import json, os, sys
+          path = sys.argv[1]
+          spec = json.load(open(path))
           job_id = spec['job_id']
           source_url = spec['source_url']
           if not all(c.isalnum() or c in '._-' for c in job_id):
@@ -44,7 +46,7 @@ jobs:
           JOB_ID: ${{ steps.spec.outputs.job_id }}
         run: |
           set -euo pipefail
-          mkdir -p /tmp/gemini-stage .gemini-bridge/jobs
+          mkdir -p /tmp/gemini-stage .gemini-bridge/jobs .gemini-bridge/results
           yt-dlp --no-playlist --merge-output-format mp4 -S 'res:480,vcodec:h264,acodec:aac' -o '/tmp/gemini-stage/source.%(ext)s' "$SOURCE_URL"
           INPUT=$(find /tmp/gemini-stage -maxdepth 1 -type f | head -n 1)
           ffmpeg -y -i "$INPUT" -vf "scale='min(854,iw)':-2" -c:v libx264 -preset veryfast -crf 28 -c:a aac -b:a 96k -movflags +faststart ".gemini-bridge/jobs/${JOB_ID}.mp4"
@@ -57,33 +59,20 @@ jobs:
             echo "Compressed video still exceeds 99 MB" >&2
             exit 1
           fi
+          python - <<'PY'
+          import json, os
+          job_id = os.environ['JOB_ID']
+          raw = f'https://raw.githubusercontent.com/Veektall/LightWorship/main/.gemini-bridge/jobs/{job_id}.mp4'
+          size = os.path.getsize(f'.gemini-bridge/jobs/{job_id}.mp4')
+          json.dump({'ok': True, 'job_id': job_id, 'source_url': raw, 'size_bytes': size}, open(f'.gemini-bridge/results/{job_id}.json', 'w'))
+          PY
 
-      - name: Commit staged media
+      - name: Commit staged media and result
         env:
           JOB_ID: ${{ steps.spec.outputs.job_id }}
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add ".gemini-bridge/jobs/${JOB_ID}.mp4"
+          git add ".gemini-bridge/jobs/${JOB_ID}.mp4" ".gemini-bridge/results/${JOB_ID}.json"
           git commit -m "Stage Gemini video ${JOB_ID}"
           git push
-
-      - name: Report staged URL
-        uses: actions/github-script@v7
-        env:
-          JOB_ID: ${{ steps.spec.outputs.job_id }}
-        with:
-          script: |
-            const raw = `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/main/.gemini-bridge/jobs/${process.env.JOB_ID}.mp4`;
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: `Video staged successfully.\n\n${raw}`
-            });
-            await github.rest.issues.update({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              state: 'closed'
-            });
