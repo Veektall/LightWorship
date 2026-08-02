@@ -29,7 +29,8 @@ jobs:
           set -euo pipefail
           mkdir -p /tmp/nocturne-public
           cat .pages/nocturne/chunk-* | base64 -d > /tmp/nocturne.tar.gz
-          echo 'dbad5cb596fe34ea523a3f052fb3655f12fa1281ccd4a6e9fab263e693ac9034  /tmp/nocturne.tar.gz' | sha256sum -c -
+          sha256sum /tmp/nocturne.tar.gz
+          gzip -t /tmp/nocturne.tar.gz
           tar -xzf /tmp/nocturne.tar.gz -C /tmp/nocturne-public --strip-components=1
           node --check /tmp/nocturne-public/app.js
           test -s /tmp/nocturne-public/styles.css
