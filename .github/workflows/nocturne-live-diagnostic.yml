@@ -19,7 +19,7 @@ jobs:
           node-version: '22'
       - name: Diagnose live page
         env:
-          SITE_URL: https://raw.githack.com/Veektall/LightWorship/main/site/index.html
+          SITE_URL: https://cdn.jsdelivr.net/gh/Veektall/LightWorship@5a9f2c4c15f7e71628e297aa51f8898d563b307f/site/index.html
         shell: bash
         run: |
           npm init -y >/dev/null 2>&1
