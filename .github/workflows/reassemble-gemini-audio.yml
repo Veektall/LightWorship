@@ -1,0 +1,75 @@
+name: Reassemble Gemini Audio
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  reassemble:
+    if: startsWith(github.event.issue.title, 'gemini-stage-audio:') && github.actor == 'Veektall'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Parse request
+        id: spec
+        env:
+          BODY: ${{ github.event.issue.body }}
+        run: |
+          python - <<'PY'
+          import json, os
+          spec=json.loads(os.environ['BODY'])
+          job_id=spec['job_id']
+          output_file=spec['output_file']
+          if not job_id.replace('-','').replace('_','').isalnum():
+              raise SystemExit('invalid job_id')
+          if '/' in output_file or not output_file.endswith('.ogg'):
+              raise SystemExit('invalid output_file')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:
+              f.write(f'job_id={job_id}\noutput_file={output_file}\n')
+          PY
+
+      - name: Reassemble and validate
+        env:
+          JOB_ID: ${{ steps.spec.outputs.job_id }}
+          OUTPUT_FILE: ${{ steps.spec.outputs.output_file }}
+        run: |
+          set -euo pipefail
+          STAGE=".gemini-bridge/staging/${JOB_ID}"
+          DEST=".gemini-bridge/jobs/${OUTPUT_FILE}"
+          test -d "$STAGE"
+          mkdir -p "$(dirname "$DEST")"
+          cat "$STAGE"/part-*.txt | base64 -d > "$DEST"
+          test -s "$DEST"
+          ffprobe -v error -show_entries format=duration,size -of json "$DEST"
+          sha256sum "$DEST"
+          rm -rf "$STAGE"
+
+      - name: Commit audio
+        env:
+          JOB_ID: ${{ steps.spec.outputs.job_id }}
+          OUTPUT_FILE: ${{ steps.spec.outputs.output_file }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Stage Gemini audio review package: ${OUTPUT_FILE}"
+          git push
+
+      - name: Report success
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          OUTPUT_FILE: ${{ steps.spec.outputs.output_file }}
+        run: |
+          URL="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/.gemini-bridge/jobs/${OUTPUT_FILE}"
+          gh issue comment "$ISSUE" --body "Gemini audio staging completed. Source URL: $URL"
+          gh issue close "$ISSUE"
