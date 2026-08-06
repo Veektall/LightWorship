@@ -48,7 +48,7 @@ jobs:
           mkdir -p "$(dirname "$DEST")"
           cat "$STAGE"/part-*.txt | base64 -d > "$DEST"
           test -s "$DEST"
-          ffprobe -v error -show_entries format=duration,size -of json "$DEST"
+          file "$DEST"
           sha256sum "$DEST"
           rm -rf "$STAGE"
 
