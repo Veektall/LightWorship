@@ -1,0 +1,27 @@
+name: Gemma Public Ingress Test
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  test:
+    if: startsWith(github.event.issue.title, 'gemma-public-ingress:') && github.actor == github.repository_owner
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Publish tiny release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="gemma-public-ingress-${GITHUB_RUN_ID}"
+          printf 'public-gemma-ingress-ok\nrun=%s\n' "$GITHUB_RUN_ID" > ingress-test.txt
+          gh release create "$TAG" ingress-test.txt --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes "Temporary transfer test" --latest=false
+          URL="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" --jq '.assets[0].browser_download_url')"
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE}/comments" -f body="PUBLIC_INGRESS_READY ${URL}"
