@@ -1,0 +1,39 @@
+name: Gemma 4 Python 3.13 Runtime Bridge
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  build:
+    if: startsWith(github.event.issue.title, 'gemma4-runtime313:') && github.actor == github.repository_owner
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download Python 3.13 wheelhouse
+        run: |
+          set -euo pipefail
+          mkdir -p wheelhouse
+          python -m pip download --dest wheelhouse --only-binary=:all: 'litert-lm==0.15.0' 'litert-lm-api==0.15.0'
+          python - <<'PY'
+          import pathlib, sys
+          print(sys.version)
+          for p in sorted(pathlib.Path('wheelhouse').iterdir()): print(p.name, p.stat().st_size)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gemma4-runtime313
+          path: wheelhouse
+          retention-days: 1
+          compression-level: 0
+      - name: Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE}/comments" -f body="GEMMA4_RUNTIME313_READY run_id=${GITHUB_RUN_ID}"
