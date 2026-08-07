@@ -1,0 +1,163 @@
+name: Gemma 4 E4B Workspace Bridge
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  build:
+    if: startsWith(github.event.issue.title, 'gemma4-build:') && github.actor == github.repository_owner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Prepare tools
+        run: |
+          set -euo pipefail
+          python -m pip install -q --upgrade huggingface_hub hf_xet
+          mkdir -p payload/model payload/wheelhouse payload/meta
+
+      - name: Download official Gemma 4 E4B LiteRT-LM model
+        env:
+          HF_HUB_ENABLE_HF_TRANSFER: "0"
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from huggingface_hub import hf_hub_download
+          p = hf_hub_download(
+              repo_id='litert-community/gemma-4-E4B-it-litert-lm',
+              filename='gemma-4-E4B-it.litertlm',
+              local_dir='payload/model',
+          )
+          print(p)
+          PY
+          test -s payload/model/gemma-4-E4B-it.litertlm
+          echo '0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0  payload/model/gemma-4-E4B-it.litertlm' | sha256sum -c -
+          stat -c '%n %s bytes' payload/model/gemma-4-E4B-it.litertlm
+
+      - name: Download LiteRT-LM runtime wheelhouse
+        run: |
+          set -euo pipefail
+          python -m pip download \
+            --dest payload/wheelhouse \
+            --only-binary=:all: \
+            'litert-lm==0.15.0' \
+            'litert-lm-api==0.15.0'
+          ls -lh payload/wheelhouse
+
+      - name: Split model and write manifest
+        run: |
+          set -euo pipefail
+          cd payload/model
+          split -b 450M -d -a 2 gemma-4-E4B-it.litertlm gemma4-e4b.part-
+          sha256sum gemma4-e4b.part-* > ../meta/PARTS.SHA256
+          sha256sum gemma-4-E4B-it.litertlm > ../meta/MODEL.SHA256
+          stat -c '%n %s' gemma4-e4b.part-* > ../meta/PARTS.SIZES
+          rm gemma-4-E4B-it.litertlm
+          cd ../..
+          printf '%s\n' \
+            'model=litert-community/gemma-4-E4B-it-litert-lm' \
+            'file=gemma-4-E4B-it.litertlm' \
+            'sha256=0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0' \
+            'runtime=litert-lm==0.15.0 litert-lm-api==0.15.0' \
+            'chunk_size=450M' > payload/meta/BUILD.txt
+          cat payload/meta/PARTS.SIZES
+
+      - name: Upload metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemma4-e4b-meta
+          path: payload/meta
+          retention-days: 1
+          compression-level: 0
+
+      - name: Upload runtime wheelhouse
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemma4-e4b-runtime
+          path: payload/wheelhouse
+          retention-days: 1
+          compression-level: 0
+
+      - name: Upload model part 00
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemma4-e4b-part-00
+          path: payload/model/gemma4-e4b.part-00
+          retention-days: 1
+          compression-level: 0
+      - name: Upload model part 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemma4-e4b-part-01
+          path: payload/model/gemma4-e4b.part-01
+          retention-days: 1
+          compression-level: 0
+      - name: Upload model part 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemma4-e4b-part-02
+          path: payload/model/gemma4-e4b.part-02
+          retention-days: 1
+          compression-level: 0
+      - name: Upload model part 03
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemma4-e4b-part-03
+          path: payload/model/gemma4-e4b.part-03
+          retention-days: 1
+          compression-level: 0
+      - name: Upload model part 04
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemma4-e4b-part-04
+          path: payload/model/gemma4-e4b.part-04
+          retention-days: 1
+          compression-level: 0
+      - name: Upload model part 05
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemma4-e4b-part-05
+          path: payload/model/gemma4-e4b.part-05
+          retention-days: 1
+          compression-level: 0
+      - name: Upload model part 06
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemma4-e4b-part-06
+          path: payload/model/gemma4-e4b.part-06
+          retention-days: 1
+          compression-level: 0
+      - name: Upload model part 07
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemma4-e4b-part-07
+          path: payload/model/gemma4-e4b.part-07
+          retention-days: 1
+          compression-level: 0
+      - name: Upload model part 08
+        if: ${{ hashFiles('payload/model/gemma4-e4b.part-08') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemma4-e4b-part-08
+          path: payload/model/gemma4-e4b.part-08
+          retention-days: 1
+          compression-level: 0
+
+      - name: Report success
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE}/comments" -f body="GEMMA4_BRIDGE_READY run_id=${GITHUB_RUN_ID} sha256=0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0"
+
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE}/comments" -f body="GEMMA4_BRIDGE_FAILED run_id=${GITHUB_RUN_ID}"
