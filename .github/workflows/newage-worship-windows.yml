@@ -99,8 +99,9 @@ jobs:
           } else {
             "Using runner-provided Inno Setup at $iscc" | Tee-Object 'NEWAGE_WORSHIP/TEST_EVIDENCE/innosetup-install.log'
           }
-          $version = (Get-Item $iscc).VersionInfo.ProductVersion
-          "Inno Setup version=$version; executable=$iscc; source=GitHub-hosted Windows image or pinned Chocolatey fallback; zero-cost build dependency." | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/build-dependencies.txt'
+          $help = (& $iscc /? 2>&1 | Out-String)
+          $versionLine = (($help -split "`r?`n") | Where-Object { $_ -match 'version|Inno Setup 6' } | Select-Object -First 1)
+          "Inno Setup: $versionLine; executable=$iscc; source=GitHub-hosted Windows image or pinned Chocolatey fallback; zero-cost build dependency." | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/build-dependencies.txt'
 
       - name: Build Windows installer
         shell: pwsh
@@ -113,12 +114,38 @@ jobs:
           if (-not (Test-Path $installer)) { throw 'Expected installer was not produced.' }
           Get-FileHash -Algorithm SHA256 $installer | Format-List | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/installer-sha256.txt'
 
-      - name: Installer smoke inspection
+      - name: Install launch and uninstall smoke test
         shell: pwsh
         run: |
-          $installer = Get-Item 'NEWAGE_WORSHIP/artifacts/NewAgeWorship-Setup.exe'
-          if ($installer.Length -lt 100000) { throw "Installer suspiciously small: $($installer.Length) bytes" }
-          "PASS installer exists; bytes=$($installer.Length)" | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/installer-smoke.log'
+          $ErrorActionPreference = 'Stop'
+          $installer = (Resolve-Path 'NEWAGE_WORSHIP/artifacts/NewAgeWorship-Setup.exe').Path
+          if ((Get-Item $installer).Length -lt 100000) { throw 'Installer is suspiciously small.' }
+          $installDir = Join-Path $env:RUNNER_TEMP 'NewAgeWorshipInstalled'
+          if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force }
+          $args = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',('/DIR=' + '"' + $installDir + '"'))
+          $install = Start-Process -FilePath $installer -ArgumentList $args -PassThru -Wait
+          if ($install.ExitCode -ne 0) { throw "Installer exited $($install.ExitCode)" }
+          $desktop = Join-Path $installDir 'NewAgeWorship.exe'
+          $hostExe = Join-Path $installDir 'ProgramHost/NewAgeWorship.ProgramHost.exe'
+          if (-not (Test-Path $desktop)) { throw 'Installed desktop executable is missing.' }
+          if (-not (Test-Path $hostExe)) { throw 'Installed Program Host executable is missing.' }
+          $host = Start-Process -FilePath $hostExe -PassThru
+          Start-Sleep -Seconds 3
+          $host.Refresh()
+          if ($host.HasExited) { throw "Program Host exited during launch smoke test with code $($host.ExitCode)" }
+          Stop-Process -Id $host.Id -Force
+          $uninstaller = Join-Path $installDir 'unins000.exe'
+          if (-not (Test-Path $uninstaller)) { throw 'Uninstaller is missing.' }
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -PassThru -Wait
+          if ($uninstall.ExitCode -ne 0) { throw "Uninstaller exited $($uninstall.ExitCode)" }
+          Start-Sleep -Seconds 1
+          if (Test-Path $desktop) { throw 'Desktop executable remains after uninstall.' }
+          @(
+            'PASS: installer executed silently',
+            'PASS: NewAgeWorship.exe installed',
+            'PASS: ProgramHost installed and stayed alive for 3 seconds',
+            'PASS: uninstaller executed silently and removed desktop executable'
+          ) | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/installer-smoke.log'
 
       - name: Upload Windows 7 engineering release candidate
         uses: actions/upload-artifact@v4
