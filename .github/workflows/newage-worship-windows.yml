@@ -51,7 +51,7 @@ jobs:
           $patchZip = Join-Path $env:RUNNER_TEMP 'NW_PATCH.zip'
           [IO.File]::WriteAllBytes($patchZip, [Convert]::FromBase64String($patchB64))
           $patchHash = (Get-FileHash -Algorithm SHA256 $patchZip).Hash.ToLowerInvariant()
-          $patchExpected = '266ade556b26945d263aea04a27f75f43093dfee98bd36f7123fc43ffb0c9a6f'
+          $patchExpected = 'dbb66b1d84ae67790df9db6a7abe06be43f3508bca993090ffdb74bb8b993c43'
           "patch_bundle_sha256=$patchHash" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           if ($patchHash -ne $patchExpected) { throw "Patch bundle hash mismatch: $patchHash" }
           Expand-Archive -Path $patchZip -DestinationPath 'NEWAGE_WORSHIP' -Force
