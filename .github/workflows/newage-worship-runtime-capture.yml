@@ -115,7 +115,8 @@ jobs:
           Set-Content -Path 'CaptureHarness.cs' -Value $code -Encoding UTF8
           $out=(Resolve-Path 'NEWAGE_WORSHIP/src/NewAgeWorship.Desktop/bin/Release/net48').Path
           $csc="$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe"
-          & $csc /nologo /target:exe /out:"$out\CaptureHarness.exe" /reference:"$out\NewAgeWorship.exe" /reference:"$out\NewAgeWorship.Core.dll" /reference:WindowsBase.dll /reference:PresentationCore.dll /reference:PresentationFramework.dll /reference:System.Xaml.dll /reference:System.dll CaptureHarness.cs
+          $refDir=Join-Path ${env:ProgramFiles(x86)} 'Reference Assemblies\Microsoft\Framework\.NETFramework\v4.8'
+          & $csc /nologo /target:exe /out:"$out\CaptureHarness.exe" /reference:"$out\NewAgeWorship.exe" /reference:"$out\NewAgeWorship.Core.dll" /reference:"$refDir\WindowsBase.dll" /reference:"$refDir\PresentationCore.dll" /reference:"$refDir\PresentationFramework.dll" /reference:"$refDir\System.Xaml.dll" /reference:"$refDir\System.dll" CaptureHarness.cs
           if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
 
       - name: Render actual runtime states
