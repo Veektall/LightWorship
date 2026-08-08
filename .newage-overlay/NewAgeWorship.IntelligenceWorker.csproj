@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>NewAgeWorship.IntelligenceWorker</AssemblyName>
+    <RootNamespace>NewAgeWorship.IntelligenceWorker</RootNamespace>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\NewAgeWorship.Core\NewAgeWorship.Core.csproj" />
+  </ItemGroup>
+</Project>
