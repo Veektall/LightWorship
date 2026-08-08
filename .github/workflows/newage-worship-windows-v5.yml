@@ -1,0 +1,39 @@
+name: NEWAGE WORSHIP Windows Legacy V5
+on:
+  push:
+    branches: [newage-worship-v1.0.0]
+    paths: ['.newage-overlay/**','.github/workflows/newage-worship-windows-v5.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  issues: write
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - uses: NuGet/setup-nuget@v2
+        with: {nuget-version: '6.12.1'}
+      - name: Build test package and publish extended Legacy RC
+        shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: ./.newage-overlay/build-v5.ps1 -Repository '${{ github.repository }}' -Commit '${{ github.sha }}' -RunId '${{ github.run_id }}'
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NewAgeWorship-V5-${{ github.run_id }}
+          path: |
+            NEWAGE_WORSHIP/artifacts/*
+            NEWAGE_WORSHIP/TEST_EVIDENCE/**
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Publish failure diagnostic
+        if: failure()
+        shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $log='No compiler log.';if(Test-Path NEWAGE_WORSHIP/TEST_EVIDENCE/build.log){$log=(Get-Content NEWAGE_WORSHIP/TEST_EVIDENCE/build.log -Tail 140)-join"`n"}
+          gh issue create --repo '${{ github.repository }}' --title 'newage-v5-failure-${{ github.run_id }}' --body "Windows hosted runner failure (not Win7 certification).`n```text`n$log`n```"
