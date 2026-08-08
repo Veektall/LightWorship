@@ -1,0 +1,139 @@
+name: NEWAGE WORSHIP Runtime Capture
+
+on:
+  push:
+    branches: [newage-worship-v1.0.0]
+    paths:
+      - '.github/workflows/newage-worship-runtime-capture.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $names=@(
+            '.newage-bootstrap/source.b64.part00',
+            '.newage-bootstrap/source.b64.part01',
+            '.newage-bootstrap/source.b64.fix020',
+            '.newage-bootstrap/source.b64.fix021',
+            '.newage-bootstrap/source.b64.part03',
+            '.newage-bootstrap/source.b64.part04',
+            '.newage-bootstrap/source.b64.part05'
+          )
+          $b64=($names|ForEach-Object{(Get-Content $_ -Raw).Trim()}) -join ''
+          $zip=Join-Path $env:RUNNER_TEMP 'NW_CODE.zip'
+          [IO.File]::WriteAllBytes($zip,[Convert]::FromBase64String($b64))
+          $hash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash -ne 'e4536533827c313e18da37f1b645ffe0532a95c5b6f1e77f77d98f86c03e8424'){throw "source hash mismatch $hash"}
+          Expand-Archive $zip . -Force
+
+      - uses: microsoft/setup-msbuild@v2
+      - uses: NuGet/setup-nuget@v2
+        with:
+          nuget-version: '6.12.1'
+
+      - name: Build actual WPF application
+        shell: pwsh
+        run: |
+          msbuild 'NEWAGE_WORSHIP/NewAgeWorship.sln' /t:Restore /p:RestorePackagesConfig=true /v:minimal
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          msbuild 'NEWAGE_WORSHIP/NewAgeWorship.sln' /m /p:Configuration=Release /p:Platform="Any CPU" /v:minimal
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+
+      - name: Create runtime capture harness
+        shell: pwsh
+        run: |
+          $code=@'
+          using System;
+          using System.IO;
+          using System.Reflection;
+          using System.Threading;
+          using System.Windows;
+          using System.Windows.Controls;
+          using System.Windows.Media;
+          using System.Windows.Media.Imaging;
+          using System.Windows.Threading;
+          using NewAgeWorship.Desktop;
+
+          public static class CaptureHarness
+          {
+              [STAThread]
+              public static void Main()
+              {
+                  Directory.CreateDirectory("capture");
+                  var app = new Application();
+                  var w = new MainWindow();
+                  w.Width=1380; w.Height=820; w.Left=10; w.Top=10; w.Show();
+                  Pump(900); Shot(w,"capture/01-initial.png");
+
+                  var scenes=(ListBox)w.FindName("SceneList");
+                  scenes.SelectedIndex=1; Pump(650); Shot(w,"capture/02-welcome-preview.png");
+                  Invoke(w,"TakeLive_Click"); Pump(650); Shot(w,"capture/03-welcome-live.png");
+
+                  scenes.SelectedIndex=2; Pump(650); Shot(w,"capture/04-prayer-preview.png");
+                  var command=(TextBox)w.FindName("CommandBox"); command.Text="John 3:16";
+                  Invoke(w,"ParseScripture_Click"); Pump(650); Shot(w,"capture/05-scripture-preview.png");
+                  Invoke(w,"TakeLive_Click"); Pump(650); Shot(w,"capture/06-scripture-live.png");
+
+                  Invoke(w,"Blackout_Click"); Pump(650); Shot(w,"capture/07-blackout.png");
+                  Invoke(w,"Emergency_Click"); Pump(650); Shot(w,"capture/08-emergency.png");
+                  w.Close(); app.Shutdown();
+              }
+              static void Invoke(MainWindow w,string name)
+              {
+                  var m=typeof(MainWindow).GetMethod(name,BindingFlags.NonPublic|BindingFlags.Instance);
+                  if(m==null) throw new Exception("missing handler "+name);
+                  m.Invoke(w,new object[]{w,new RoutedEventArgs()});
+              }
+              static void Pump(int ms)
+              {
+                  var frame=new DispatcherFrame();
+                  var timer=new DispatcherTimer(DispatcherPriority.Background){Interval=TimeSpan.FromMilliseconds(ms)};
+                  timer.Tick+=(s,e)=>{timer.Stop();frame.Continue=false;}; timer.Start(); Dispatcher.PushFrame(frame);
+              }
+              static void Shot(Window w,string path)
+              {
+                  w.UpdateLayout();
+                  int width=(int)Math.Ceiling(w.ActualWidth); int height=(int)Math.Ceiling(w.ActualHeight);
+                  var bmp=new RenderTargetBitmap(width,height,96,96,PixelFormats.Pbgra32);
+                  bmp.Render(w);
+                  var enc=new PngBitmapEncoder(); enc.Frames.Add(BitmapFrame.Create(bmp));
+                  using(var fs=File.Create(path)) enc.Save(fs);
+              }
+          }
+          '@
+          Set-Content -Path 'CaptureHarness.cs' -Value $code -Encoding UTF8
+          $out=(Resolve-Path 'NEWAGE_WORSHIP/src/NewAgeWorship.Desktop/bin/Release/net48').Path
+          $csc="$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe"
+          & $csc /nologo /target:exe /out:"$out\CaptureHarness.exe" /reference:"$out\NewAgeWorship.exe" /reference:"$out\NewAgeWorship.Core.dll" /reference:WindowsBase.dll /reference:PresentationCore.dll /reference:PresentationFramework.dll /reference:System.Xaml.dll /reference:System.dll CaptureHarness.cs
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+
+      - name: Render actual runtime states
+        shell: pwsh
+        run: |
+          $dir=(Resolve-Path 'NEWAGE_WORSHIP/src/NewAgeWorship.Desktop/bin/Release/net48').Path
+          Push-Location $dir
+          & .\CaptureHarness.exe
+          $code=$LASTEXITCODE
+          Pop-Location
+          if($code -ne 0){exit $code}
+          if(-not (Test-Path "$dir\capture\08-emergency.png")){throw 'runtime capture did not produce final frame'}
+          New-Item -ItemType Directory -Force runtime-capture | Out-Null
+          Copy-Item "$dir\capture\*.png" runtime-capture/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NewAgeWorship-Actual-WPF-Runtime-Capture
+          path: runtime-capture/*.png
+          if-no-files-found: error
+          retention-days: 7
