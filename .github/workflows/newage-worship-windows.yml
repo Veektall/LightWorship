@@ -5,6 +5,7 @@ on:
     branches: [newage-worship-v1.0.0]
     paths:
       - '.newage-bootstrap/**'
+      - '.newage-patch/**'
       - '.github/workflows/newage-worship-windows.yml'
   workflow_dispatch:
 
@@ -21,11 +22,11 @@ jobs:
       - name: Checkout implementation branch
         uses: actions/checkout@v4
 
-      - name: Reconstruct and verify source bundle
+      - name: Reconstruct verify and apply source
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $names = @(
+          $sourceNames = @(
             '.newage-bootstrap/source.b64.part00',
             '.newage-bootstrap/source.b64.part01',
             '.newage-bootstrap/source.b64.fix020',
@@ -34,15 +35,34 @@ jobs:
             '.newage-bootstrap/source.b64.part04',
             '.newage-bootstrap/source.b64.part05'
           )
-          foreach ($name in $names) { if (-not (Test-Path $name)) { throw "Missing source chunk: $name" } }
-          $b64 = ($names | ForEach-Object { (Get-Content $_ -Raw).Trim() }) -join ''
-          $zip = Join-Path $env:RUNNER_TEMP 'NW_CODE.zip'
-          [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($b64))
-          $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
-          $expected = 'e4536533827c313e18da37f1b645ffe0532a95c5b6f1e77f77d98f86c03e8424'
-          "source_bundle_sha256=$actual" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          if ($actual -ne $expected) { throw "Source bundle hash mismatch: $actual" }
-          Expand-Archive -Path $zip -DestinationPath . -Force
+          foreach ($name in $sourceNames) { if (-not (Test-Path $name)) { throw "Missing source chunk: $name" } }
+          $sourceB64 = ($sourceNames | ForEach-Object { (Get-Content $_ -Raw).Trim() }) -join ''
+          $sourceZip = Join-Path $env:RUNNER_TEMP 'NW_CODE.zip'
+          [IO.File]::WriteAllBytes($sourceZip, [Convert]::FromBase64String($sourceB64))
+          $sourceHash = (Get-FileHash -Algorithm SHA256 $sourceZip).Hash.ToLowerInvariant()
+          $sourceExpected = 'e4536533827c313e18da37f1b645ffe0532a95c5b6f1e77f77d98f86c03e8424'
+          "source_bundle_sha256=$sourceHash" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          if ($sourceHash -ne $sourceExpected) { throw "Source bundle hash mismatch: $sourceHash" }
+          Expand-Archive -Path $sourceZip -DestinationPath . -Force
+
+          $patchNames = 0..6 | ForEach-Object { '.newage-patch/patch.b64.{0:D2}' -f $_ }
+          foreach ($name in $patchNames) { if (-not (Test-Path $name)) { throw "Missing patch chunk: $name" } }
+          $patchB64 = ($patchNames | ForEach-Object { (Get-Content $_ -Raw).Trim() }) -join ''
+          $patchZip = Join-Path $env:RUNNER_TEMP 'NW_PATCH.zip'
+          [IO.File]::WriteAllBytes($patchZip, [Convert]::FromBase64String($patchB64))
+          $patchHash = (Get-FileHash -Algorithm SHA256 $patchZip).Hash.ToLowerInvariant()
+          $patchExpected = '266ade556b26945d263aea04a27f75f43093dfee98bd36f7123fc43ffb0c9a6f'
+          "patch_bundle_sha256=$patchHash" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          if ($patchHash -ne $patchExpected) { throw "Patch bundle hash mismatch: $patchHash" }
+          Expand-Archive -Path $patchZip -DestinationPath 'NEWAGE_WORSHIP' -Force
+
+          # The patch archive was generated before a duplicate WPF BorderBrush assignment was noticed.
+          # Remove only the redundant nested assignment; the visible brush value remains unchanged.
+          $studioXaml = 'NEWAGE_WORSHIP/src/NewAgeWorship.Desktop/DesignStudioWindow.xaml'
+          $studio = Get-Content $studioXaml -Raw
+          $studio = $studio -replace '<Border.BorderBrush><SolidColorBrush Color="#66A9D1FF"/></Border.BorderBrush>',''
+          Set-Content -Path $studioXaml -Value $studio -Encoding UTF8
+
           if (-not (Test-Path 'NEWAGE_WORSHIP/NewAgeWorship.sln')) { throw 'Solution missing after bootstrap extraction.' }
           New-Item -ItemType Directory -Force 'NEWAGE_WORSHIP/TEST_EVIDENCE' | Out-Null
 
@@ -99,9 +119,9 @@ jobs:
           } else {
             "Using runner-provided Inno Setup at $iscc" | Tee-Object 'NEWAGE_WORSHIP/TEST_EVIDENCE/innosetup-install.log'
           }
-          $help = (& $iscc /? 2>&1 | Out-String)
-          $versionLine = (($help -split "`r?`n") | Where-Object { $_ -match 'version|Inno Setup 6' } | Select-Object -First 1)
-          "Inno Setup: $versionLine; executable=$iscc; source=GitHub-hosted Windows image or pinned Chocolatey fallback; zero-cost build dependency." | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/build-dependencies.txt'
+          $versionInfo = (Get-Item $iscc).VersionInfo
+          $version = if ($versionInfo.FileVersion) { $versionInfo.FileVersion } elseif ($versionInfo.ProductVersion) { $versionInfo.ProductVersion } else { 'version-not-exposed-by-file-metadata' }
+          "Inno Setup version=$version; executable=$iscc; source=GitHub-hosted Windows image or pinned Chocolatey fallback; zero-cost build dependency." | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/build-dependencies.txt'
 
       - name: Build Windows installer
         shell: pwsh
