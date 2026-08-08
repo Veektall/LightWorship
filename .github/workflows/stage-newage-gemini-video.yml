@@ -1,0 +1,74 @@
+name: Stage NEWAGE runtime video for Gemini
+
+on:
+  push:
+    branches: [newage-worship-v1.0.0]
+    paths:
+      - '.github/workflows/stage-newage-gemini-video.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  stage:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: newage-worship-v1.0.0
+
+      - name: Download actual runtime frames
+        uses: actions/download-artifact@v4
+        with:
+          name: NewAgeWorship-Actual-WPF-Runtime-Capture
+          path: runtime-frames
+          repository: Veektall/LightWorship
+          run-id: 31284478142
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build verification MP4
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
+            choco install ffmpeg -y --no-progress
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          @"
+          file '01-initial.png'
+          duration 2.2
+          file '02-welcome-preview.png'
+          duration 2.2
+          file '03-welcome-live.png'
+          duration 2.2
+          file '04-prayer-preview.png'
+          duration 2.2
+          file '05-scripture-preview.png'
+          duration 2.2
+          file '06-scripture-live.png'
+          duration 2.2
+          file '07-blackout.png'
+          duration 2.2
+          file '08-emergency.png'
+          duration 2.8
+          file '08-emergency.png'
+          "@ | Set-Content runtime-frames/concat.txt -Encoding ascii
+          Push-Location runtime-frames
+          ffmpeg -y -f concat -safe 0 -i concat.txt -vf "fps=15,scale=720:-2,format=yuv420p" -c:v libx264 -crf 30 -preset veryfast -movflags +faststart NewAgeWorship-Internal-Runtime-Verify.mp4
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Pop-Location
+
+      - name: Stage temporary video in approved Gemini path
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force '.gemini-bridge/jobs' | Out-Null
+          Copy-Item 'runtime-frames/NewAgeWorship-Internal-Runtime-Verify.mp4' '.gemini-bridge/jobs/NewAgeWorship-Internal-Runtime-Verify.mp4' -Force
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add '.gemini-bridge/jobs/NewAgeWorship-Internal-Runtime-Verify.mp4'
+          git commit -m 'stage: temporary NEWAGE runtime video for Gemini verification'
+          git push origin HEAD:newage-worship-v1.0.0
