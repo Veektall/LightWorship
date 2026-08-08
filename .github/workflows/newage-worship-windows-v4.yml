@@ -1,0 +1,42 @@
+name: NEWAGE WORSHIP Windows Legacy V4
+on:
+  push:
+    branches: [newage-worship-v1.0.0]
+    paths: ['.newage-bootstrap/**','.newage-patch/**','.newage-overlay/**','.github/workflows/newage-worship-windows-v4.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  issues: write
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - uses: NuGet/setup-nuget@v2
+        with: {nuget-version: '6.12.1'}
+      - name: Build test package and publish
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./.newage-overlay/build-v4.ps1 -Repository '${{ github.repository }}' -Commit '${{ github.sha }}' -RunId '${{ github.run_id }}'
+      - name: Upload evidence even if a later publish step fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NewAgeWorship-V4-${{ github.run_id }}
+          path: |
+            NEWAGE_WORSHIP/artifacts/*
+            NEWAGE_WORSHIP/TEST_EVIDENCE/**
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Publish failure log as issue
+        if: failure()
+        shell: pwsh
+        env: {GH_TOKEN: '${{ github.token }}'}
+        run: |
+          $log='No build log was produced.'
+          if(Test-Path NEWAGE_WORSHIP/TEST_EVIDENCE/build.log){$log=(Get-Content NEWAGE_WORSHIP/TEST_EVIDENCE/build.log -Tail 120)-join"`n"}
+          $body="Run ${{ github.run_id }}`nCommit ${{ github.sha }}`nWindows hosted runner (not Windows 7 certification).`n```text`n$log`n```"
+          gh issue create --repo '${{ github.repository }}' --title 'newage-v4-failure-${{ github.run_id }}' --body $body
