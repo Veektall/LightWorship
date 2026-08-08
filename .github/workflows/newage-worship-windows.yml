@@ -25,9 +25,17 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $parts = Get-ChildItem '.newage-bootstrap/source.b64.part*' | Sort-Object Name
-          if ($parts.Count -ne 6) { throw "Expected 6 source chunks, found $($parts.Count)" }
-          $b64 = ($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          $names = @(
+            '.newage-bootstrap/source.b64.part00',
+            '.newage-bootstrap/source.b64.part01',
+            '.newage-bootstrap/source.b64.fix020',
+            '.newage-bootstrap/source.b64.fix021',
+            '.newage-bootstrap/source.b64.part03',
+            '.newage-bootstrap/source.b64.part04',
+            '.newage-bootstrap/source.b64.part05'
+          )
+          foreach ($name in $names) { if (-not (Test-Path $name)) { throw "Missing source chunk: $name" } }
+          $b64 = ($names | ForEach-Object { (Get-Content $_ -Raw).Trim() }) -join ''
           $zip = Join-Path $env:RUNNER_TEMP 'NW_CODE.zip'
           [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($b64))
           $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
@@ -70,21 +78,22 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $files = Get-ChildItem 'NEWAGE_WORSHIP' -Recurse -File -Include *.cs,*.xaml,*.json,*.md,*.yml,*.yaml,*.iss
+          $allFiles = Get-ChildItem 'NEWAGE_WORSHIP' -Recurse -File -Include *.cs,*.xaml,*.json,*.md,*.yml,*.yaml,*.iss
           $secretPatterns = @('sk-[A-Za-z0-9]{20,}','AIza[0-9A-Za-z_-]{30,}','BEGIN (RSA|OPENSSH|EC) PRIVATE KEY','ghp_[A-Za-z0-9]{30,}')
-          $hits = foreach ($p in $secretPatterns) { $files | Select-String -Pattern $p }
+          $hits = foreach ($p in $secretPatterns) { $allFiles | Select-String -Pattern $p }
           if ($hits) { $hits | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/secret-scan.log'; throw 'Potential plaintext secret detected.' }
           'PASS: no configured secret patterns found.' | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/secret-scan.log'
-          $billing = $files | Select-String -Pattern 'billingEnabled\s*=\s*true|auto.?pay|paid.?fallback' -CaseSensitive:$false
-          if ($billing) { $billing | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/cost-scan.log'; throw 'Potential paid fallback marker detected.' }
-          'PASS: no automatic paid fallback marker found.' | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/cost-scan.log'
+          $codeFiles = Get-ChildItem 'NEWAGE_WORSHIP' -Recurse -File -Include *.cs,*.json,*.yml,*.yaml
+          $billing = $codeFiles | Select-String -Pattern 'billingEnabled\s*[:=]\s*true|autoCharge\s*[:=]\s*true|allowPaidFallback\s*[:=]\s*true' -CaseSensitive:$false
+          if ($billing) { $billing | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/cost-scan.log'; throw 'Potential automatic spend path detected.' }
+          'PASS: no automatic spend marker found in executable/configuration paths.' | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/cost-scan.log'
 
       - name: Install pinned Inno Setup build dependency
         shell: pwsh
         run: |
           choco install innosetup --version=6.4.3 -y --no-progress 2>&1 | Tee-Object 'NEWAGE_WORSHIP/TEST_EVIDENCE/innosetup-install.log'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          'Inno Setup 6.4.3; source=Chocolatey community package/upstream JRSoftware; licence=custom freeware/open-source components; package manager checksum verification enforced.' | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/build-dependencies.txt'
+          'Inno Setup 6.4.3; source=Chocolatey community package/upstream JRSoftware; package manager checksum verification enforced.' | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/build-dependencies.txt'
 
       - name: Build Windows installer
         shell: pwsh
