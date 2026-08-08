@@ -88,12 +88,19 @@ jobs:
           if ($billing) { $billing | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/cost-scan.log'; throw 'Potential automatic spend path detected.' }
           'PASS: no automatic spend marker found in executable/configuration paths.' | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/cost-scan.log'
 
-      - name: Install pinned Inno Setup build dependency
+      - name: Resolve Inno Setup build dependency
         shell: pwsh
         run: |
-          choco install innosetup --version=6.4.3 -y --no-progress 2>&1 | Tee-Object 'NEWAGE_WORSHIP/TEST_EVIDENCE/innosetup-install.log'
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          'Inno Setup 6.4.3; source=Chocolatey community package/upstream JRSoftware; package manager checksum verification enforced.' | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/build-dependencies.txt'
+          $ErrorActionPreference = 'Stop'
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --version=6.4.3 -y --no-progress 2>&1 | Tee-Object 'NEWAGE_WORSHIP/TEST_EVIDENCE/innosetup-install.log'
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } else {
+            "Using runner-provided Inno Setup at $iscc" | Tee-Object 'NEWAGE_WORSHIP/TEST_EVIDENCE/innosetup-install.log'
+          }
+          $version = (Get-Item $iscc).VersionInfo.ProductVersion
+          "Inno Setup version=$version; executable=$iscc; source=GitHub-hosted Windows image or pinned Chocolatey fallback; zero-cost build dependency." | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/build-dependencies.txt'
 
       - name: Build Windows installer
         shell: pwsh
