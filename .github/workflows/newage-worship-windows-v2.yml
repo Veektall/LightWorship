@@ -1,0 +1,201 @@
+name: NEWAGE WORSHIP Windows Legacy Build V2
+
+on:
+  push:
+    branches: [newage-worship-v1.0.0]
+    paths:
+      - '.newage-bootstrap/**'
+      - '.newage-patch/**'
+      - '.github/workflows/newage-worship-windows-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+jobs:
+  build-win7-legacy:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct verified source and deterministic patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $sourceNames=@('.newage-bootstrap/source.b64.part00','.newage-bootstrap/source.b64.part01','.newage-bootstrap/source.b64.fix020','.newage-bootstrap/source.b64.fix021','.newage-bootstrap/source.b64.part03','.newage-bootstrap/source.b64.part04','.newage-bootstrap/source.b64.part05')
+          $sourceB64=($sourceNames|%{(Get-Content $_ -Raw).Trim()}) -join ''
+          $sourceZip=Join-Path $env:RUNNER_TEMP 'NW_CODE.zip'
+          [IO.File]::WriteAllBytes($sourceZip,[Convert]::FromBase64String($sourceB64))
+          $sourceHash=(Get-FileHash -Algorithm SHA256 $sourceZip).Hash.ToLowerInvariant()
+          if($sourceHash -ne 'e4536533827c313e18da37f1b645ffe0532a95c5b6f1e77f77d98f86c03e8424'){throw "Source SHA mismatch $sourceHash"}
+          Expand-Archive $sourceZip . -Force
+          $patchNames=0..6|%{'.newage-patch/patch.b64.{0:D2}' -f $_}
+          $patchB64=($patchNames|%{(Get-Content $_ -Raw).Trim()}) -join ''
+          $patchZip=Join-Path $env:RUNNER_TEMP 'NW_PATCH.zip'
+          [IO.File]::WriteAllBytes($patchZip,[Convert]::FromBase64String($patchB64))
+          $patchHash=(Get-FileHash -Algorithm SHA256 $patchZip).Hash.ToLowerInvariant()
+          if($patchHash -ne 'dbb66b1d84ae67790df9db6a7abe06be43f3508bca993090ffdb74bb8b993c43'){throw "Patch SHA mismatch $patchHash"}
+          Expand-Archive $patchZip NEWAGE_WORSHIP -Force
+          New-Item -ItemType Directory -Force NEWAGE_WORSHIP/TEST_EVIDENCE|Out-Null
+          "source=$sourceHash`npatch=$patchHash"|Out-File NEWAGE_WORSHIP/TEST_EVIDENCE/source-integrity.txt
+
+      - name: Apply transparent compiler compatibility corrections
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $studio='NEWAGE_WORSHIP/src/NewAgeWorship.Desktop/DesignStudioWindow.xaml'
+          (Get-Content $studio -Raw).Replace('<Border.BorderBrush><SolidColorBrush Color="#66A9D1FF"/></Border.BorderBrush>','')|Set-Content $studio -Encoding UTF8
+          $py=@'
+          from pathlib import Path
+          import re
+          root=Path('NEWAGE_WORSHIP'); report=[]
+          p=root/'Directory.Build.props'; s=p.read_text(encoding='utf-8'); s2=re.sub(r'<LangVersion>[^<]+</LangVersion>','<LangVersion>8.0</LangVersion>',s); p.write_text(s2,encoding='utf-8'); report.append('C# 8.0 syntax; net48 unchanged')
+          p=root/'src/NewAgeWorship.Core/Models/Contracts.cs'; s=p.read_text(encoding='utf-8'); s=s.replace('= TransitionKind.Cut;','= NewAgeWorship.Core.Models.TransitionKind.Cut;'); p.write_text(s,encoding='utf-8'); report.append('Qualified transition enum initializer')
+          def span(text,cls):
+              m=re.search(r'public\s+(?:sealed\s+)?class\s+'+re.escape(cls)+r'\b[^\{]*\{',text)
+              if not m:return None
+              d=0
+              for i in range(m.end()-1,len(text)):
+                  if text[i]=='{':d+=1
+                  elif text[i]=='}':
+                      d-=1
+                      if d==0:return m.start(),i+1
+          p=root/'src/NewAgeWorship.Core/Models/ExtendedModels.cs'; s=p.read_text(encoding='utf-8')
+          sp=span(s,'AssetRecord')
+          if sp:
+              b=s[sp[0]:sp[1]]; found=re.findall(r'public\s+([\w<>?.]+)\s+(\w+)\s*\{\s*get;\s*set;\s*\}',b); names={n for _,n in found}; cand=[(t,n) for t,n in found if n.lower().endswith('kind') and n!='Kind']
+              if 'Kind' not in names and cand:
+                  t,n=cand[0]; pos=sp[1]-1; s=s[:pos]+f'\n        public {t} Kind {{ get {{ return {n}; }} set {{ {n} = value; }} }}\n'+s[pos:]; report.append('AssetRecord.Kind alias')
+          sp=span(s,'BibleSearchCandidate')
+          if sp:
+              b=s[sp[0]:sp[1]]; names=set(re.findall(r'public\s+[\w<>?.]+\s+(\w+)\s*\{\s*get;\s*set;',b)); add=[]
+              for t,n,d in [('string','Translation','string.Empty'),('string','Reference','string.Empty'),('string','Text','string.Empty'),('double','Score','0d')]:
+                  if n not in names:add.append(f'        public {t} {n} {{ get; set; }} = {d};')
+              if 'BibleSearchCandidate(' not in b:
+                  add += ['        public BibleSearchCandidate() { }','        public BibleSearchCandidate(params object[] values) { if (values == null) return; foreach (var value in values) { if (value is string text) { if (string.IsNullOrWhiteSpace(Reference)) Reference=text; else if (string.IsNullOrWhiteSpace(Text)) Text=text; else if (string.IsNullOrWhiteSpace(Translation)) Translation=text; } else if (value is double score) Score=score; else if (value is float f) Score=f; } }']
+              if add:
+                  pos=sp[1]-1; s=s[:pos]+'\n'+'\n'.join(add)+'\n'+s[pos:]; report.append('BibleSearchCandidate compatibility members')
+          p.write_text(s,encoding='utf-8')
+          p=root/'src/NewAgeWorship.Core/Services/DeterministicFeatureServices.cs'; s=p.read_text(encoding='utf-8')
+          m=re.search(r'new\s+ProviderPolicy\s*\((.*?)\)',s,re.S)
+          if m and ':' in m.group(1):
+              parts=[]
+              for part in re.split(r',\s*(?=\w+\s*:)',m.group(1).strip()):
+                  mm=re.match(r'(\w+)\s*:\s*(.*)',part,re.S)
+                  if mm:parts.append(mm.group(2).strip())
+              if parts:s=s[:m.start()]+'new ProviderPolicy('+', '.join(parts)+')'+s[m.end():]; report.append('ProviderPolicy positional constructor call')
+          p.write_text(s,encoding='utf-8')
+          (root/'TEST_EVIDENCE/compiler-compatibility-fixes.txt').write_text('\n'.join(report)+'\n',encoding='utf-8')
+          '@
+          $py|python -
+          if($LASTEXITCODE-ne 0){exit $LASTEXITCODE}
+
+      - uses: microsoft/setup-msbuild@v2
+      - uses: NuGet/setup-nuget@v2
+        with:
+          nuget-version: '6.12.1'
+
+      - name: Restore
+        shell: pwsh
+        run: |
+          msbuild NEWAGE_WORSHIP/NewAgeWorship.sln /t:Restore /p:RestorePackagesConfig=true /v:minimal 2>&1|Tee-Object NEWAGE_WORSHIP/TEST_EVIDENCE/restore.log
+          if($LASTEXITCODE-ne 0){exit $LASTEXITCODE}
+
+      - name: Compile
+        shell: pwsh
+        run: |
+          msbuild NEWAGE_WORSHIP/NewAgeWorship.sln /m /p:Configuration=Release /p:Platform="Any CPU" /bl:NEWAGE_WORSHIP/TEST_EVIDENCE/build.binlog /v:minimal 2>&1|Tee-Object NEWAGE_WORSHIP/TEST_EVIDENCE/build.log
+          if($LASTEXITCODE-ne 0){exit $LASTEXITCODE}
+
+      - name: Foundation tests
+        shell: pwsh
+        run: |
+          & NEWAGE_WORSHIP/tests/NewAgeWorship.FoundationTests/bin/Release/net48/NewAgeWorship.FoundationTests.exe 2>&1|Tee-Object NEWAGE_WORSHIP/TEST_EVIDENCE/foundation-tests.log
+          if($LASTEXITCODE-ne 0){exit $LASTEXITCODE}
+
+      - name: Security and zero-spend scans
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $files=Get-ChildItem NEWAGE_WORSHIP -Recurse -File -Include *.cs,*.xaml,*.json,*.yml,*.yaml,*.iss
+          $secret=@('sk-[A-Za-z0-9]{20,}','AIza[0-9A-Za-z_-]{30,}','BEGIN (RSA|OPENSSH|EC) PRIVATE KEY','ghp_[A-Za-z0-9]{30,}')
+          $hits=foreach($p in $secret){$files|Select-String -Pattern $p}; if($hits){$hits|Out-File NEWAGE_WORSHIP/TEST_EVIDENCE/secret-scan.log;throw 'Potential secret detected'}
+          'PASS'|Out-File NEWAGE_WORSHIP/TEST_EVIDENCE/secret-scan.log
+          $billing=$files|Select-String -Pattern 'billingEnabled\s*[:=]\s*true|autoCharge\s*[:=]\s*true|allowPaidFallback\s*[:=]\s*true' -CaseSensitive:$false; if($billing){$billing|Out-File NEWAGE_WORSHIP/TEST_EVIDENCE/cost-scan.log;throw 'Automatic spend marker detected'}
+          'PASS'|Out-File NEWAGE_WORSHIP/TEST_EVIDENCE/cost-scan.log
+
+      - name: Resolve Inno Setup
+        shell: pwsh
+        run: |
+          $iscc=Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
+          if(-not(Test-Path $iscc)){choco install innosetup --version=6.4.3 -y --no-progress;if($LASTEXITCODE-ne 0){exit $LASTEXITCODE}}
+          $v=(Get-Item $iscc).VersionInfo.FileVersion; "Inno Setup=$v"|Out-File NEWAGE_WORSHIP/TEST_EVIDENCE/build-dependencies.txt
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc=Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
+          & $iscc NEWAGE_WORSHIP/installer/NewAgeWorship.iss 2>&1|Tee-Object NEWAGE_WORSHIP/TEST_EVIDENCE/installer-build.log
+          if($LASTEXITCODE-ne 0){exit $LASTEXITCODE}
+          Get-FileHash -Algorithm SHA256 NEWAGE_WORSHIP/artifacts/NewAgeWorship-Setup.exe|Format-List|Out-File NEWAGE_WORSHIP/TEST_EVIDENCE/installer-sha256.txt
+
+      - name: Install launch uninstall smoke
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop';$installer=(Resolve-Path NEWAGE_WORSHIP/artifacts/NewAgeWorship-Setup.exe).Path;$dir=Join-Path $env:RUNNER_TEMP NewAgeWorshipInstalled
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-',('/DIR="'+$dir+'"')) -PassThru -Wait;if($p.ExitCode-ne 0){throw "install=$($p.ExitCode)"}
+          $desktop=Join-Path $dir NewAgeWorship.exe;$hostExe=Join-Path $dir ProgramHost/NewAgeWorship.ProgramHost.exe;if(!(Test-Path $desktop)-or !(Test-Path $hostExe)){throw 'installed executables missing'}
+          $host=Start-Process $hostExe -PassThru;Start-Sleep 3;$host.Refresh();if($host.HasExited){throw "host exited=$($host.ExitCode)"};Stop-Process $host.Id -Force
+          $un=Join-Path $dir unins000.exe;$u=Start-Process $un -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART') -PassThru -Wait;if($u.ExitCode-ne 0){throw "uninstall=$($u.ExitCode)"}
+          Start-Sleep 1;if(Test-Path $desktop){throw 'desktop remains after uninstall'}
+          'PASS install; PASS ProgramHost launch; PASS uninstall'|Out-File NEWAGE_WORSHIP/TEST_EVIDENCE/installer-smoke.log
+
+      - name: Upload evidence and installer
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: NewAgeWorship-Windows7-V2-${{ github.run_id }}
+          path: |
+            NEWAGE_WORSHIP/artifacts/NewAgeWorship-Setup.exe
+            NEWAGE_WORSHIP/TEST_EVIDENCE/**
+            NEWAGE_WORSHIP/VERIFICATION_REPORT.html
+            NEWAGE_WORSHIP/HARDWARE_ACCEPTANCE_CHECKLIST.html
+            NEWAGE_WORSHIP/IMPLEMENTATION_STATE.json
+            NEWAGE_WORSHIP/IMPLEMENTATION_LEDGER.md
+            NEWAGE_WORSHIP/ENVIRONMENT_REPORT.md
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Publish resumable CI status issue
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $status='${{ job.status }}';$run='${{ github.run_id }}';$sha='${{ github.sha }}'
+          $tail='No build log.';if(Test-Path NEWAGE_WORSHIP/TEST_EVIDENCE/build.log){$tail=(Get-Content NEWAGE_WORSHIP/TEST_EVIDENCE/build.log -Tail 80)-join "`n"}
+          $tests='No test log.';if(Test-Path NEWAGE_WORSHIP/TEST_EVIDENCE/foundation-tests.log){$tests=(Get-Content NEWAGE_WORSHIP/TEST_EVIDENCE/foundation-tests.log -Tail 60)-join "`n"}
+          $body=@"
+          Automated NEWAGE WORSHIP Windows Legacy CI report.
+
+          Run: $run
+          Commit: $sha
+          Status: $status
+          Runner: Windows hosted runner (not Windows 7 physical certification)
+
+          Build tail:
+          ```text
+          $tail
+          ```
+
+          Test tail:
+          ```text
+          $tests
+          ```
+          "@
+          gh issue create --repo '${{ github.repository }}' --title "newage-ci-$run-$status" --body $body
