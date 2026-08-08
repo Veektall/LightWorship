@@ -1,0 +1,120 @@
+name: NEWAGE WORSHIP Windows Legacy Build
+
+on:
+  push:
+    branches: [newage-worship-v1.0.0]
+    paths:
+      - '.newage-bootstrap/**'
+      - '.github/workflows/newage-worship-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-win7-legacy:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      CI: 'true'
+    steps:
+      - name: Checkout implementation branch
+        uses: actions/checkout@v4
+
+      - name: Reconstruct and verify source bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $parts = Get-ChildItem '.newage-bootstrap/source.b64.part*' | Sort-Object Name
+          if ($parts.Count -ne 6) { throw "Expected 6 source chunks, found $($parts.Count)" }
+          $b64 = ($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          $zip = Join-Path $env:RUNNER_TEMP 'NW_CODE.zip'
+          [IO.File]::WriteAllBytes($zip, [Convert]::FromBase64String($b64))
+          $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          $expected = 'e4536533827c313e18da37f1b645ffe0532a95c5b6f1e77f77d98f86c03e8424'
+          "source_bundle_sha256=$actual" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          if ($actual -ne $expected) { throw "Source bundle hash mismatch: $actual" }
+          Expand-Archive -Path $zip -DestinationPath . -Force
+          if (-not (Test-Path 'NEWAGE_WORSHIP/NewAgeWorship.sln')) { throw 'Solution missing after bootstrap extraction.' }
+          New-Item -ItemType Directory -Force 'NEWAGE_WORSHIP/TEST_EVIDENCE' | Out-Null
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+        with:
+          nuget-version: '6.12.1'
+
+      - name: Restore .NET Framework dependencies
+        shell: pwsh
+        run: |
+          msbuild 'NEWAGE_WORSHIP/NewAgeWorship.sln' /t:Restore /p:RestorePackagesConfig=true /v:minimal 2>&1 | Tee-Object 'NEWAGE_WORSHIP/TEST_EVIDENCE/restore.log'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Compile Legacy WPF solution
+        shell: pwsh
+        run: |
+          msbuild 'NEWAGE_WORSHIP/NewAgeWorship.sln' /m /p:Configuration=Release /p:Platform="Any CPU" /bl:'NEWAGE_WORSHIP/TEST_EVIDENCE/build.binlog' /v:minimal 2>&1 | Tee-Object 'NEWAGE_WORSHIP/TEST_EVIDENCE/build.log'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run foundation test harness
+        shell: pwsh
+        run: |
+          $exe = 'NEWAGE_WORSHIP/tests/NewAgeWorship.FoundationTests/bin/Release/net48/NewAgeWorship.FoundationTests.exe'
+          if (-not (Test-Path $exe)) { throw "Foundation test executable missing: $exe" }
+          & $exe 2>&1 | Tee-Object 'NEWAGE_WORSHIP/TEST_EVIDENCE/foundation-tests.log'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Static secret and zero-cost policy checks
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = Get-ChildItem 'NEWAGE_WORSHIP' -Recurse -File -Include *.cs,*.xaml,*.json,*.md,*.yml,*.yaml,*.iss
+          $secretPatterns = @('sk-[A-Za-z0-9]{20,}','AIza[0-9A-Za-z_-]{30,}','BEGIN (RSA|OPENSSH|EC) PRIVATE KEY','ghp_[A-Za-z0-9]{30,}')
+          $hits = foreach ($p in $secretPatterns) { $files | Select-String -Pattern $p }
+          if ($hits) { $hits | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/secret-scan.log'; throw 'Potential plaintext secret detected.' }
+          'PASS: no configured secret patterns found.' | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/secret-scan.log'
+          $billing = $files | Select-String -Pattern 'billingEnabled\s*=\s*true|auto.?pay|paid.?fallback' -CaseSensitive:$false
+          if ($billing) { $billing | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/cost-scan.log'; throw 'Potential paid fallback marker detected.' }
+          'PASS: no automatic paid fallback marker found.' | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/cost-scan.log'
+
+      - name: Install pinned Inno Setup build dependency
+        shell: pwsh
+        run: |
+          choco install innosetup --version=6.4.3 -y --no-progress 2>&1 | Tee-Object 'NEWAGE_WORSHIP/TEST_EVIDENCE/innosetup-install.log'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          'Inno Setup 6.4.3; source=Chocolatey community package/upstream JRSoftware; licence=custom freeware/open-source components; package manager checksum verification enforced.' | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/build-dependencies.txt'
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6/ISCC.exe'
+          if (-not (Test-Path $iscc)) { throw "ISCC not found: $iscc" }
+          & $iscc 'NEWAGE_WORSHIP/installer/NewAgeWorship.iss' 2>&1 | Tee-Object 'NEWAGE_WORSHIP/TEST_EVIDENCE/installer-build.log'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $installer = 'NEWAGE_WORSHIP/artifacts/NewAgeWorship-Setup.exe'
+          if (-not (Test-Path $installer)) { throw 'Expected installer was not produced.' }
+          Get-FileHash -Algorithm SHA256 $installer | Format-List | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/installer-sha256.txt'
+
+      - name: Installer smoke inspection
+        shell: pwsh
+        run: |
+          $installer = Get-Item 'NEWAGE_WORSHIP/artifacts/NewAgeWorship-Setup.exe'
+          if ($installer.Length -lt 100000) { throw "Installer suspiciously small: $($installer.Length) bytes" }
+          "PASS installer exists; bytes=$($installer.Length)" | Out-File 'NEWAGE_WORSHIP/TEST_EVIDENCE/installer-smoke.log'
+
+      - name: Upload Windows 7 engineering release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: NewAgeWorship-Windows7-Foundation
+          path: |
+            NEWAGE_WORSHIP/artifacts/NewAgeWorship-Setup.exe
+            NEWAGE_WORSHIP/TEST_EVIDENCE/**
+            NEWAGE_WORSHIP/VERIFICATION_REPORT.html
+            NEWAGE_WORSHIP/HARDWARE_ACCEPTANCE_CHECKLIST.html
+            NEWAGE_WORSHIP/IMPLEMENTATION_STATE.json
+            NEWAGE_WORSHIP/IMPLEMENTATION_LEDGER.md
+            NEWAGE_WORSHIP/ENVIRONMENT_REPORT.md
+          if-no-files-found: error
+          retention-days: 7
