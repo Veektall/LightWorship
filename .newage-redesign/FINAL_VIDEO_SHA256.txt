@@ -1,0 +1,5 @@
+NewAgeWorship-Redesign-Final-Runtime.mp4
+eabecceb595bebe914d7af813da5c7d8ee97127f693f08b534a73ec8770cbd61
+21.500 seconds
+1440x900 H.264 yuv420p
+Source: actual NEWAGE WORSHIP WPF runtime frames from successful V5B capture run 31286083076.
