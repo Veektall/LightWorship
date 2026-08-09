@@ -1,0 +1,15 @@
+name: Dispatch NEWAGE functional V4
+on:
+  push:
+    branches: [newage-worship-v1.0.0]
+    paths: ['.github/workflows/dispatch-newage-functional-v4.yml']
+permissions:
+  actions: write
+  contents: read
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run newage-functional-integration-loop-v4.yml --repo Veektall/LightWorship --ref newage-worship-v1.0.0
