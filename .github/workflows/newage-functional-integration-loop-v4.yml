@@ -39,9 +39,10 @@ jobs:
         shell: pwsh
         run: |
           $out=(Resolve-Path 'NEWAGE_WORSHIP/src/NewAgeWorship.Desktop/bin/Release/net48').Path
+          $source=(Resolve-Path '.newage-functional-v4/FunctionalAcceptance.cs').Path
           $csc="$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe"
           $ref=Join-Path ${env:ProgramFiles(x86)} 'Reference Assemblies\Microsoft\Framework\.NETFramework\v4.8'
-          & $csc /nologo /target:exe /out:"$out\FunctionalAcceptanceV4.exe" /reference:"$out\NewAgeWorship.exe" /reference:"$out\NewAgeWorship.Core.dll" /reference:"$out\System.Data.SQLite.dll" /reference:"$out\NAudio.dll" /reference:"$out\Vosk.dll" /reference:"$ref\System.Speech.dll" '.newage-functional-v4/FunctionalAcceptance.cs'
+          & $csc /nologo /target:exe /out:"$out\FunctionalAcceptanceV4.exe" /reference:"$out\NewAgeWorship.exe" /reference:"$out\NewAgeWorship.Core.dll" /reference:"$out\System.Data.SQLite.dll" /reference:"$out\NAudio.dll" /reference:"$out\Vosk.dll" /reference:"$ref\System.Speech.dll" "$source"
           if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
 
       - name: Run strict engine acceptance
@@ -60,10 +61,11 @@ jobs:
         shell: pwsh
         run: |
           $out=(Resolve-Path 'NEWAGE_WORSHIP/src/NewAgeWorship.Desktop/bin/Release/net48').Path
+          $source=(Resolve-Path '.newage-functional-v4/CaptureFunctional.cs').Path
           Copy-Item 'john-three-sixteen.wav' "$out/john-three-sixteen.wav" -Force
           $csc="$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe"
           $ref=Join-Path ${env:ProgramFiles(x86)} 'Reference Assemblies\Microsoft\Framework\.NETFramework\v4.8'
-          & $csc /nologo /target:exe /out:"$out\CaptureFunctionalV4.exe" /reference:"$out\NewAgeWorship.exe" /reference:"$out\NewAgeWorship.Core.dll" /reference:"$ref\WindowsBase.dll" /reference:"$ref\PresentationCore.dll" /reference:"$ref\PresentationFramework.dll" /reference:"$ref\System.Xaml.dll" '.newage-functional-v4/CaptureFunctional.cs'
+          & $csc /nologo /target:exe /out:"$out\CaptureFunctionalV4.exe" /reference:"$out\NewAgeWorship.exe" /reference:"$out\NewAgeWorship.Core.dll" /reference:"$ref\WindowsBase.dll" /reference:"$ref\PresentationCore.dll" /reference:"$ref\PresentationFramework.dll" /reference:"$ref\System.Xaml.dll" "$source"
           if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
 
       - name: Capture actual functional WPF runtime
