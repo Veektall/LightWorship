@@ -1,0 +1,102 @@
+using System;
+using System.Collections.ObjectModel;
+using System.IO;
+using System.Security.Cryptography;
+using System.Diagnostics;
+using System.Windows;
+using System.Windows.Controls;
+using NewAgeWorship.Core.Models;
+using NewAgeWorship.Core.Services;
+using Forms=System.Windows.Forms;
+
+namespace NewAgeWorship.Desktop
+{
+    public partial class MainWindow : Window
+    {
+        private readonly ObservableCollection<SceneDefinition> _scenes = new ObservableCollection<SceneDefinition>();
+        private readonly PresentationController _presentation;
+        private readonly RecoveryStore _store;
+        private readonly ScriptureReferenceParser _scripture = new ScriptureReferenceParser();
+        private Process _programHost;
+        private readonly ProgramSnapshotPublisher _publisher;
+        private LocalCompanionServer _phone;
+        private readonly string _token;
+
+        public MainWindow()
+        {
+            InitializeComponent();
+            var data=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"NEWAGE WORSHIP"); Directory.CreateDirectory(data);
+            _store=new RecoveryStore(Path.Combine(data,"newage-worship.db"));
+            var recovered=_store.Load(); _presentation=new PresentationController(recovered);
+            _publisher=new ProgramSnapshotPublisher(Path.Combine(data,"program.snapshot.json")); _publisher.Publish(_presentation.State.Program);
+            _presentation.StateChanged += Presentation_StateChanged;
+            _token=CreateToken(); PhoneToken.Text=_token;
+            SeedScenes(); SceneList.ItemsSource=_scenes; SceneList.SelectedIndex=0;
+            Refresh();
+            _store.Audit("system","startup","ready","desktop");
+        }
+        private void SeedScenes()
+        {
+            _scenes.Add(SceneFactory.SafeReady());
+
+            var welcome=new SceneDefinition{Name="Welcome",Background="#FF0B1B2B"};
+            welcome.Layers.Add(new LayerDefinition{Kind=LayerKind.Text,Content="WELCOME",X=.08,Y=.18,Width=.84,Height=.12,FontSize=24,Foreground="#FF79DCD0",ZIndex=1});
+            welcome.Layers.Add(new LayerDefinition{Kind=LayerKind.Text,Content="We are glad you are here",X=.08,Y=.34,Width=.84,Height=.24,FontSize=58,ZIndex=2});
+            welcome.Layers.Add(new LayerDefinition{Kind=LayerKind.Text,Content="NEWAGE WORSHIP",X=.08,Y=.68,Width=.84,Height=.08,FontSize=19,Foreground="#FF8FA8BD",ZIndex=3});
+            _scenes.Add(welcome);
+
+            var prayer=new SceneDefinition{Name="Prayer Point",Background="#FF151124"};
+            prayer.Layers.Add(new LayerDefinition{Kind=LayerKind.Text,Content="PRAYER POINT",X=.08,Y=.16,Width=.84,Height=.10,FontSize=22,Foreground="#FFC4A9FF",ZIndex=1});
+            prayer.Layers.Add(new LayerDefinition{Kind=LayerKind.Text,Content="Lord, lead us with wisdom and courage.",X=.08,Y=.31,Width=.84,Height=.36,FontSize=46,ZIndex=2});
+            prayer.Layers.Add(new LayerDefinition{Kind=LayerKind.Text,Content="Pray with faith",X=.08,Y=.72,Width=.84,Height=.08,FontSize=18,Foreground="#FF9C8EBB",ZIndex=3});
+            _scenes.Add(prayer);
+        }
+        private void SceneList_SelectionChanged(object sender, SelectionChangedEventArgs e){var s=SceneList.SelectedItem as SceneDefinition;if(s!=null)_presentation.SetPreview(s);}
+        private void TakeLive_Click(object sender,RoutedEventArgs e){_presentation.TakeLive();_store.Audit("operator","take-live","ok","desktop");}
+        private void Freeze_Click(object sender,RoutedEventArgs e){_presentation.Freeze(!_presentation.State.Frozen);_store.Audit("operator","freeze",_presentation.State.Frozen.ToString(),"desktop");}
+        private void Blackout_Click(object sender,RoutedEventArgs e){_presentation.Blackout();_store.Audit("operator","blackout","ok","desktop");}
+        private void Logo_Click(object sender,RoutedEventArgs e){_presentation.ShowLogo();_store.Audit("operator","logo","ok","desktop");}
+        private void Emergency_Click(object sender,RoutedEventArgs e){_presentation.Emergency("PLEASE FOLLOW THE SERVICE TEAM'S INSTRUCTIONS");_store.Audit("operator","emergency","ok","desktop");}
+        private void AddTextScene_Click(object sender,RoutedEventArgs e){var s=new SceneDefinition{Name="New Text Scene",Background="#FF172436"};s.Layers.Add(new LayerDefinition{Kind=LayerKind.Text,Content="Double-click editing is scheduled for Design Studio foundation",X=.08,Y=.3,Width=.84,Height=.4,FontSize=42});_scenes.Add(s);SceneList.SelectedItem=s;}
+        private void AddScriptureScene_Click(object sender,RoutedEventArgs e){CommandBox.Text="John 3:16";ParseScripture_Click(sender,e);}
+        private void ParseScripture_Click(object sender,RoutedEventArgs e)
+        {
+            ScriptureReference r; if(!_scripture.TryParse(CommandBox.Text,out r)){CommandResult.Text="Reference not recognised. Nothing projected.";return;}
+            var s=new SceneDefinition{Name=r.ToString(),Background="#FF0C2632"};s.Layers.Add(new LayerDefinition{Kind=LayerKind.Scripture,Content=r.ToString(),X=.08,Y=.28,Width=.84,Height=.26,FontSize=72,ZIndex=1});s.Layers.Add(new LayerDefinition{Kind=LayerKind.Text,Content="Verse text is loaded only from a licensed/imported translation.",X=.1,Y=.58,Width=.8,Height=.14,FontSize=24,Foreground="#FFB4D1DA",ZIndex=2});_scenes.Add(s);SceneList.SelectedItem=s;CommandResult.Text="Parsed: "+r+" • held in Preview";
+        }
+        private void OpenProgram_Click(object sender,RoutedEventArgs e)
+        {
+            try
+            {
+                if(_programHost!=null && !_programHost.HasExited) return;
+                var exe=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"NewAgeWorship.ProgramHost.exe");
+                if(!File.Exists(exe)){FooterStatus.Text="Program Host executable is missing; Program remains protected in operator preview only.";return;}
+                _publisher.Publish(_presentation.State.Program);
+                _programHost=Process.Start(new ProcessStartInfo(exe,"--screen 1"){UseShellExecute=false});
+                _store.Audit("operator","program-host-start","ok","desktop");
+            } catch(Exception){FooterStatus.Text="Program Host could not start. Last valid operator Program remains unchanged.";}
+        }
+        private void StartPhone_Click(object sender,RoutedEventArgs e)
+        {
+            try{if(_phone==null){_phone=new LocalCompanionServer(_presentation,8765,_token);_phone.Start();PhoneStatus.Text="Running on port 8765. For production, configure HTTPS certificate binding; plain HTTP is compatibility fallback only.";}else{_phone.Dispose();_phone=null;PhoneStatus.Text="Stopped";}}catch(Exception){PhoneStatus.Text="Phone server could not bind. Run with required URL ACL or use administrator setup.";}
+        }
+        private void Save_Click(object sender,RoutedEventArgs e){_store.Save(_presentation.State);FooterStatus.Text="Saved at "+DateTime.Now.ToLongTimeString();}
+        private void Presentation_StateChanged(object sender,EventArgs e){Dispatcher.BeginInvoke(new Action(()=>{_store.Save(_presentation.State);_publisher.Publish(_presentation.State.Program);Refresh();}));}
+        private void Refresh()
+        {
+            SceneRenderer.Render(_presentation.State.Preview,PreviewSurface);
+            SceneRenderer.Render(_presentation.State.Program,ProgramSurface);
+            ModeBadge.Text=_presentation.State.Mode.ToString().ToUpperInvariant();
+            ProfileBadge.Text=_presentation.State.Profile.ToString().ToUpperInvariant();
+            ProgramStatus.Text=_presentation.State.Frozen?"FROZEN":"LIVE";
+            FreezeButton.Content=_presentation.State.Frozen?"UNFREEZE":"FREEZE";
+            PreviewSceneName.Text=_presentation.State.Preview!=null?_presentation.State.Preview.Name:"No preview";
+            PreviewFlowName.Text=_presentation.State.Preview!=null?_presentation.State.Preview.Name:"No preview";
+            ProgramFlowName.Text=_presentation.State.Program!=null?_presentation.State.Program.Name:"No program";
+            SceneCountText.Text=_scenes.Count.ToString()+" scenes";
+            SystemStatus.Text="PROGRAM  "+(_presentation.State.Program!=null?_presentation.State.Program.Name:"None")+"\nPREVIEW   "+(_presentation.State.Preview!=null?_presentation.State.Preview.Name:"None")+"\nOVERRIDE  "+(_presentation.State.AutomationPausedByHuman?"Automation paused":"Standby");
+        }
+        protected override void OnClosed(EventArgs e){try{_store.Save(_presentation.State);}catch{}try{_phone?.Dispose();}catch{}/* Program Host intentionally survives operator shutdown/crash; terminate it from Task Manager or next controlled shutdown. */_store.Dispose();base.OnClosed(e);}
+        private static string CreateToken(){var b=new byte[9];using(var r=RandomNumberGenerator.Create())r.GetBytes(b);return Convert.ToBase64String(b).Replace("+","").Replace("/","").Replace("=","");}
+    }
+}
