@@ -1,0 +1,70 @@
+name: NEWAGE WORSHIP Redesign Frames V5
+
+on:
+  push:
+    branches: [newage-worship-v1.0.0]
+    paths:
+      - '.github/workflows/newage-worship-redesign-frames-v5.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct source and apply redesign v5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $names=@('.newage-bootstrap/source.b64.part00','.newage-bootstrap/source.b64.part01','.newage-bootstrap/source.b64.fix020','.newage-bootstrap/source.b64.fix021','.newage-bootstrap/source.b64.part03','.newage-bootstrap/source.b64.part04','.newage-bootstrap/source.b64.part05')
+          $b64=($names|ForEach-Object{(Get-Content $_ -Raw).Trim()}) -join ''
+          $src=Join-Path $env:RUNNER_TEMP 'NW_CODE.zip';[IO.File]::WriteAllBytes($src,[Convert]::FromBase64String($b64))
+          if((Get-FileHash $src -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'e4536533827c313e18da37f1b645ffe0532a95c5b6f1e77f77d98f86c03e8424'){throw 'source hash mismatch'}
+          Expand-Archive $src . -Force
+          $zip='.newage-redesign/overlay-v5.zip'
+          if((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne 'af7aca7ec7ddd43ba1f57be25677c52cc03d1ae92c41a2da4575d05e6ed917c3'){throw "overlay v5 hash mismatch: $((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant())"}
+          Expand-Archive $zip 'NEWAGE_WORSHIP/src/NewAgeWorship.Desktop' -Force
+
+      - uses: microsoft/setup-msbuild@v2
+      - uses: NuGet/setup-nuget@v2
+        with:
+          nuget-version: '6.12.1'
+
+      - name: Build redesigned WPF application
+        shell: pwsh
+        run: |
+          msbuild 'NEWAGE_WORSHIP/NewAgeWorship.sln' /t:Restore /p:RestorePackagesConfig=true /v:minimal
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          msbuild 'NEWAGE_WORSHIP/NewAgeWorship.sln' /m /p:Configuration=Release /p:Platform="Any CPU" /v:minimal
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+
+      - name: Capture actual redesigned runtime states
+        shell: pwsh
+        run: |
+          $code=@'
+          using System;using System.IO;using System.Reflection;using System.Windows;using System.Windows.Controls;using System.Windows.Media;using System.Windows.Media.Imaging;using System.Windows.Threading;using NewAgeWorship.Desktop;
+          public static class CaptureHarness{
+          [STAThread]public static void Main(){Directory.CreateDirectory("capture");var app=new Application();var w=new MainWindow();w.Width=1440;w.Height=900;w.Left=8;w.Top=8;w.Show();Pump(900);Shot(w,"capture/01-initial.png");var scenes=(ListBox)w.FindName("SceneList");scenes.SelectedIndex=1;Pump(650);Shot(w,"capture/02-welcome-preview.png");Invoke(w,"TakeLive_Click");Pump(650);Shot(w,"capture/03-welcome-live.png");scenes.SelectedIndex=2;Pump(650);Shot(w,"capture/04-prayer-preview.png");var command=(TextBox)w.FindName("CommandBox");command.Text="John 3:16";Invoke(w,"ParseScripture_Click");Pump(650);Shot(w,"capture/05-scripture-preview.png");Invoke(w,"TakeLive_Click");Pump(650);Shot(w,"capture/06-scripture-live.png");Invoke(w,"Freeze_Click");Pump(500);Shot(w,"capture/07-frozen.png");Invoke(w,"Freeze_Click");Pump(300);Invoke(w,"Blackout_Click");Pump(500);Shot(w,"capture/08-blackout.png");Invoke(w,"Emergency_Click");Pump(500);Shot(w,"capture/09-emergency.png");w.Close();app.Shutdown();}
+          static void Invoke(MainWindow w,string n){var m=typeof(MainWindow).GetMethod(n,BindingFlags.NonPublic|BindingFlags.Instance);if(m==null)throw new Exception("missing "+n);m.Invoke(w,new object[]{w,new RoutedEventArgs()});}
+          static void Pump(int ms){var f=new DispatcherFrame();var t=new DispatcherTimer(DispatcherPriority.Background){Interval=TimeSpan.FromMilliseconds(ms)};t.Tick+=(s,e)=>{t.Stop();f.Continue=false;};t.Start();Dispatcher.PushFrame(f);}
+          static void Shot(Window w,string p){w.UpdateLayout();var b=new RenderTargetBitmap((int)Math.Ceiling(w.ActualWidth),(int)Math.Ceiling(w.ActualHeight),96,96,PixelFormats.Pbgra32);b.Render(w);var e=new PngBitmapEncoder();e.Frames.Add(BitmapFrame.Create(b));using(var fs=File.Create(p))e.Save(fs);}}
+          '@
+          Set-Content CaptureHarness.cs $code -Encoding UTF8
+          $out=(Resolve-Path 'NEWAGE_WORSHIP/src/NewAgeWorship.Desktop/bin/Release/net48').Path;$csc="$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe";$refDir=Join-Path ${env:ProgramFiles(x86)} 'Reference Assemblies\Microsoft\Framework\.NETFramework\v4.8'
+          & $csc /nologo /target:exe /out:"$out\CaptureHarness.exe" /reference:"$out\NewAgeWorship.exe" /reference:"$out\NewAgeWorship.Core.dll" /reference:"$refDir\WindowsBase.dll" /reference:"$refDir\PresentationCore.dll" /reference:"$refDir\PresentationFramework.dll" /reference:"$refDir\System.Xaml.dll" CaptureHarness.cs
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          Push-Location $out;& .\CaptureHarness.exe;$code=$LASTEXITCODE;Pop-Location;if($code -ne 0){exit $code}
+          if(-not(Test-Path "$out\capture\09-emergency.png")){throw 'capture incomplete'}
+          New-Item -ItemType Directory -Force runtime-capture|Out-Null;Copy-Item "$out\capture\*.png" runtime-capture/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NewAgeWorship-Redesign-Frames-V5
+          path: runtime-capture/*.png
+          if-no-files-found: error
+          retention-days: 7
