@@ -30,6 +30,11 @@ jobs:
           test -f functional/functional-capture/05-audio-voice.png
           cat functional/functional-test-report.txt
 
+      - name: Install FFmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+
       - name: Assemble exact runtime-state review MP4
         run: |
           set -euo pipefail
