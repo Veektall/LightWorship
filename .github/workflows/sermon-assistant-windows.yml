@@ -1,0 +1,84 @@
+name: Sermon Assistant Windows build
+
+on:
+  push:
+    branches: [sermon-assistant-build]
+    paths:
+      - '.sermon-assistant-ci/**'
+      - '.github/workflows/sermon-assistant-windows.yml'
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore CI source
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force .sermon-assistant-ci\src | Out-Null
+          tar -xzf .sermon-assistant-ci\windows-ci-src.tgz -C .sermon-assistant-ci\src
+
+      - name: Compile Windows 7 companion (.NET Framework 4.x, x86)
+        shell: powershell
+        run: |
+          $csc = "$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe"
+          if (!(Test-Path $csc)) { throw "Classic .NET Framework 4.x csc.exe not found" }
+          & $csc /nologo /target:winexe /platform:x86 /optimize+ /out:"Sermon assistant.exe" /reference:System.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll ".sermon-assistant-ci\src\Program.cs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-Item "Sermon assistant.exe" | Format-List Name,Length,LastWriteTime
+
+      - name: Companion self-test
+        shell: powershell
+        run: |
+          & ".\Sermon assistant.exe" --self-test --self-test-log self-test.log
+          if ($LASTEXITCODE -ne 0) { Get-Content self-test.log; exit $LASTEXITCODE }
+          Get-Content self-test.log
+          if ((Get-Content self-test.log -Raw) -notmatch 'SELF_TEST_OK') { throw 'Self-test marker missing' }
+
+      - name: Compile actual Android LAN client classes for integration test
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force java-test | Out-Null
+          javac -source 8 -target 8 -d java-test ".sermon-assistant-ci\src\WireProtocol.java" ".sermon-assistant-ci\src\ProjectorClient.java" ".sermon-assistant-ci\src\IntegrationHarness.java"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: End-to-end Android client to Windows companion protocol test
+        shell: powershell
+        run: |
+          $p = Start-Process -FilePath ".\Sermon assistant.exe" -ArgumentList @('--headless','--port','19077','--log','e2e.log','--exit-after','20') -PassThru
+          Start-Sleep -Milliseconds 900
+          java -cp java-test com.sermonassistant.IntegrationHarness
+          $javaExit = $LASTEXITCODE
+          Start-Sleep -Milliseconds 800
+          if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
+          if ($javaExit -ne 0) { if (Test-Path e2e.log) { Get-Content e2e.log }; exit $javaExit }
+          $log = Get-Content e2e.log -Raw
+          $required = @('STATE|CAPTION||Live caption test','STATE|SCRIPTURE|John 3:16 (NIV)|For God so loved the world','STATE|PRAYER|PRAYER POINT|Father, give us wisdom','STATE|OFFERING|OFFERING|Give with joy','STATE|ANNOUNCEMENTS|ANNOUNCEMENT|Sunday service begins at 8 AM','STATE|CLEAR||')
+          foreach ($needle in $required) { if ($log -notlike "*$needle*") { Write-Host $log; throw "Missing E2E state: $needle" } }
+          Write-Host $log
+          Write-Host 'WINDOWS_ANDROID_E2E_OK'
+
+      - name: Package companion
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force release\media | Out-Null
+          Copy-Item "Sermon assistant.exe" release\
+          @"
+          Sermon Assistant Windows 7 Projection Companion
+
+          1. Put this PC and the Android phone on the same LAN/Wi-Fi.
+          2. Connect this PC to the projector/big screen using HDMI and use Extend display mode.
+          3. Run Sermon assistant.exe and choose the secondary display.
+          4. Windows Firewall: allow Private network access when prompted.
+          5. Optional segment media: place OFFERING.jpg, TESTIMONY.jpg, WORSHIP.jpg, PRAISE.jpg, SERMON.jpg, PRAYER.jpg, ANNOUNCEMENTS.jpg, etc. in the media folder next to the EXE.
+          6. The companion listens on UDP 9076 for discovery and TCP 9077 for projection commands.
+
+          Built against classic .NET Framework 4.x APIs for Windows 7-era compatibility.
+          "@ | Set-Content -Encoding UTF8 release\README-WINDOWS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sermon-assistant-windows
+          path: release/**
+          if-no-files-found: error
