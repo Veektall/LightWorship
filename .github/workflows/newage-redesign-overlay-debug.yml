@@ -1,0 +1,33 @@
+name: NEWAGE Redesign Overlay Debug
+
+on:
+  push:
+    branches: [newage-worship-v1.0.0]
+    paths:
+      - '.github/workflows/newage-redesign-overlay-debug.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode repository overlay
+        shell: pwsh
+        run: |
+          $b64=(Get-Content '.newage-redesign/overlay-v2.b64' -Raw).Trim()
+          $zip=Join-Path $env:RUNNER_TEMP 'overlay.zip'
+          [IO.File]::WriteAllBytes($zip,[Convert]::FromBase64String($b64))
+          Write-Host "SHA256=$((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant())"
+          New-Item -ItemType Directory -Force decoded | Out-Null
+          Expand-Archive $zip decoded -Force
+          Get-ChildItem decoded | Format-Table Name,Length
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NewAgeWorship-Repository-Overlay-Debug
+          path: decoded/*
+          if-no-files-found: error
+          retention-days: 2
