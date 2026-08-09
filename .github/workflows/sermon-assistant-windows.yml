@@ -17,7 +17,9 @@ jobs:
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force .sermon-assistant-ci\src | Out-Null
-          tar -xzf .sermon-assistant-ci\windows-ci-src.tgz -C .sermon-assistant-ci\src
+          $b64 = (Get-Content .sermon-assistant-ci\windows-ci-src.b64 -Raw).Trim()
+          [IO.File]::WriteAllBytes('.sermon-assistant-ci\windows-ci-src-restored.tgz',[Convert]::FromBase64String($b64))
+          tar -xzf .sermon-assistant-ci\windows-ci-src-restored.tgz -C .sermon-assistant-ci\src
 
       - name: Compile Windows 7 companion (.NET Framework 4.x, x86)
         shell: powershell
@@ -42,7 +44,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force java-test | Out-Null
           javac -source 8 -target 8 -d java-test ".sermon-assistant-ci\src\WireProtocol.java" ".sermon-assistant-ci\src\ProjectorClient.java" ".sermon-assistant-ci\src\IntegrationHarness.java"
-          if ($LAST_EXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: End-to-end Android client to Windows companion protocol test
         shell: powershell
