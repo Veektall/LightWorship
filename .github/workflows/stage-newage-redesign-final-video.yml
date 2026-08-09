@@ -1,0 +1,79 @@
+name: Stage NEWAGE redesign final video
+
+on:
+  push:
+    branches: [newage-worship-v1.0.0]
+    paths:
+      - '.github/workflows/stage-newage-redesign-final-video.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  stage:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download verified V5B runtime frames
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          gh api repos/Veektall/LightWorship/actions/artifacts/9029850662/zip > frames.zip
+          Expand-Archive frames.zip frames -Force
+          $pngs=Get-ChildItem frames -Filter '*.png' | Sort-Object Name
+          if($pngs.Count -ne 9){throw "Expected 9 runtime frames, found $($pngs.Count)"}
+
+      - name: Install FFmpeg
+        shell: pwsh
+        run: |
+          choco install ffmpeg -y --no-progress
+          $ff=(Get-Command ffmpeg -ErrorAction Stop).Source
+          Write-Host "Using $ff"
+
+      - name: Assemble actual runtime review MP4
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $frames=Get-ChildItem frames -Filter '*.png' | Sort-Object Name
+          $lines=@()
+          foreach($f in $frames){
+            $p=$f.FullName.Replace('\\','/')
+            $lines += "file '$p'"
+            $lines += 'duration 2.15'
+          }
+          $last=$frames[-1].FullName.Replace('\\','/')
+          $lines += "file '$last'"
+          Set-Content sequence.txt $lines -Encoding ascii
+          ffmpeg -hide_banner -loglevel error -y -f concat -safe 0 -i sequence.txt -vf "scale=1440:900:force_original_aspect_ratio=decrease,pad=1440:900:(ow-iw)/2:(oh-ih)/2,format=yuv420p" -r 30 -c:v libx264 -preset veryfast -crf 19 -movflags +faststart NewAgeWorship-Redesign-Final-Runtime.mp4
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          $size=(Get-Item NewAgeWorship-Redesign-Final-Runtime.mp4).Length
+          if($size -lt 10000){throw 'Final video is unexpectedly small'}
+          ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,pix_fmt -show_entries format=duration,size -of default=noprint_wrappers=1 NewAgeWorship-Redesign-Final-Runtime.mp4
+          Get-FileHash NewAgeWorship-Redesign-Final-Runtime.mp4 -Algorithm SHA256
+
+      - name: Stage exact video for Gemini
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          New-Item -ItemType Directory -Force '.gemini-bridge/jobs' | Out-Null
+          Copy-Item NewAgeWorship-Redesign-Final-Runtime.mp4 '.gemini-bridge/jobs/NewAgeWorship-Redesign-Final-Runtime.mp4' -Force
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add '.gemini-bridge/jobs/NewAgeWorship-Redesign-Final-Runtime.mp4'
+          if(-not (git diff --cached --quiet)){
+            git commit -m 'Stage NEWAGE WORSHIP final redesign runtime video'
+            git push origin HEAD:newage-worship-v1.0.0
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NewAgeWorship-Redesign-Final-Runtime
+          path: NewAgeWorship-Redesign-Final-Runtime.mp4
+          if-no-files-found: error
+          retention-days: 7
