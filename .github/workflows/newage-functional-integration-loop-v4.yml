@@ -1,0 +1,91 @@
+name: NEWAGE WORSHIP Functional Integration Loop V4
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [newage-worship-v1.0.0]
+    paths: ['.github/workflows/newage-functional-integration-loop-v4.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  functional:
+    runs-on: windows-latest
+    timeout-minutes: 50
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare verified shell, functional source and offline runtimes
+        shell: pwsh
+        run: ./.newage-functional-v4/prepare.ps1
+
+      - uses: microsoft/setup-msbuild@v2
+      - uses: NuGet/setup-nuget@v2
+        with:
+          nuget-version: '6.12.1'
+
+      - name: Restore and build net48 application
+        shell: pwsh
+        run: |
+          msbuild 'NEWAGE_WORSHIP/NewAgeWorship.sln' /t:Restore /p:RestorePackagesConfig=true /v:minimal
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          msbuild 'NEWAGE_WORSHIP/NewAgeWorship.sln' /m /p:Configuration=Release /p:Platform="Any CPU" /v:minimal
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+
+      - name: Compile functional acceptance
+        shell: pwsh
+        run: |
+          $out=(Resolve-Path 'NEWAGE_WORSHIP/src/NewAgeWorship.Desktop/bin/Release/net48').Path
+          $csc="$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe"
+          $ref=Join-Path ${env:ProgramFiles(x86)} 'Reference Assemblies\Microsoft\Framework\.NETFramework\v4.8'
+          & $csc /nologo /target:exe /out:"$out\FunctionalAcceptanceV4.exe" /reference:"$out\NewAgeWorship.exe" /reference:"$out\NewAgeWorship.Core.dll" /reference:"$out\System.Data.SQLite.dll" /reference:"$out\NAudio.dll" /reference:"$out\Vosk.dll" /reference:"$ref\System.Speech.dll" '.newage-functional-v4/FunctionalAcceptance.cs'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+
+      - name: Run strict engine acceptance
+        shell: pwsh
+        run: |
+          $out=(Resolve-Path 'NEWAGE_WORSHIP/src/NewAgeWorship.Desktop/bin/Release/net48').Path
+          Push-Location $out
+          & .\FunctionalAcceptanceV4.exe
+          $code=$LASTEXITCODE
+          Pop-Location
+          if($code -ne 0){exit $code}
+          Copy-Item "$out/functional-test-report.txt" . -Force
+          Copy-Item "$out/john-three-sixteen.wav" . -Force
+
+      - name: Compile synchronized WPF capture harness
+        shell: pwsh
+        run: |
+          $out=(Resolve-Path 'NEWAGE_WORSHIP/src/NewAgeWorship.Desktop/bin/Release/net48').Path
+          Copy-Item 'john-three-sixteen.wav' "$out/john-three-sixteen.wav" -Force
+          $csc="$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe"
+          $ref=Join-Path ${env:ProgramFiles(x86)} 'Reference Assemblies\Microsoft\Framework\.NETFramework\v4.8'
+          & $csc /nologo /target:exe /out:"$out\CaptureFunctionalV4.exe" /reference:"$out\NewAgeWorship.exe" /reference:"$out\NewAgeWorship.Core.dll" /reference:"$ref\WindowsBase.dll" /reference:"$ref\PresentationCore.dll" /reference:"$ref\PresentationFramework.dll" /reference:"$ref\System.Xaml.dll" '.newage-functional-v4/CaptureFunctional.cs'
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+
+      - name: Capture actual functional WPF runtime
+        shell: pwsh
+        run: |
+          $out=(Resolve-Path 'NEWAGE_WORSHIP/src/NewAgeWorship.Desktop/bin/Release/net48').Path
+          Push-Location $out
+          & .\CaptureFunctionalV4.exe
+          $code=$LASTEXITCODE
+          Pop-Location
+          if($code -ne 0){exit $code}
+          if(-not (Test-Path "$out/functional-capture/05-audio-voice.png")){throw 'functional capture incomplete'}
+          New-Item -ItemType Directory -Force functional-capture | Out-Null
+          Copy-Item "$out/functional-capture/*.png" functional-capture/ -Force
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: NewAgeWorship-Functional-Acceptance-V4
+          path: |
+            functional-test-report.txt
+            functional-capture/*.png
+            john-three-sixteen.wav
+          if-no-files-found: warn
+          retention-days: 7
