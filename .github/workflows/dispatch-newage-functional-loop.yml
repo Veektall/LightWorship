@@ -14,3 +14,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run newage-functional-integration-loop.yml --repo Veektall/LightWorship --ref newage-worship-v1.0.0
+# retry 2 after capture patch repair
