@@ -1,0 +1,16 @@
+ChatGPT visual QA: PASS
+
+Review basis: actual 1440x900 WPF runtime frames from V5B run 31286083076.
+
+Passed checks:
+- Preview and Program monitor geometry is balanced and readable.
+- Preview/Program hierarchy is unambiguous at a glance.
+- NEXT UP and ON AIR live-flow decisions are explicit.
+- Live control deck is obvious and separated from setup controls.
+- Freeze state changes both Program status and action label.
+- Blackout state visibly blacks Program while retaining Preview.
+- Emergency state is strongly signaled in Program without overwhelming the whole UI.
+- No visible clipping, overflow, default grey WPF chrome, or broken layout.
+- Typography and spacing are coherent across the operator shell.
+
+Independent Gemini visual review is the next gate before user approval.
