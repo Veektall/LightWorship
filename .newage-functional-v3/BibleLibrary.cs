@@ -108,27 +108,37 @@ namespace NewAgeWorship.Desktop
                 {
                     cmd.CommandText="SELECT book,chapter,verse_key,text FROM verse_fts WHERE version=@ver AND verse_fts MATCH @q LIMIT @n";
                     cmd.Parameters.AddWithValue("@ver",translation); cmd.Parameters.AddWithValue("@q",match); cmd.Parameters.AddWithValue("@n",limit);
-                    using(var r=cmd.ExecuteReader()) while(r.Read())
-                    {
-                        var book=r.GetString(0); var chapter=r.GetInt32(1); var key=r.GetString(2);
-                        results.Add(new BiblePassage{Reference=book+" "+chapter+":"+key,RequestedReference=book+" "+chapter+":"+key,Text=r.GetString(3).Trim(),Translation=translation,Licence="User-supplied translation pack — verify redistribution rights before public release",SourceVerseKey=key});
-                    }
+                    using(var r=cmd.ExecuteReader()) while(r.Read()) AddSearchResult(results,r,translation);
                 }
             }
             catch(SQLiteException)
             {
+                // FTS is an optimisation, never a single point of failure.
+            }
+            if(results.Count==0)
+            {
                 using(var cmd=_db.CreateCommand())
                 {
-                    cmd.CommandText="SELECT book,chapter,verse_key,text FROM verses WHERE version=@ver AND text LIKE @q LIMIT @n";
-                    cmd.Parameters.AddWithValue("@ver",translation); cmd.Parameters.AddWithValue("@q","%"+query+"%"); cmd.Parameters.AddWithValue("@n",limit);
-                    using(var r=cmd.ExecuteReader()) while(r.Read())
+                    var clauses=new List<string>{"version=@ver"};
+                    cmd.Parameters.AddWithValue("@ver",translation);
+                    for(int i=0;i<tokens.Length;i++)
                     {
-                        var book=r.GetString(0); var chapter=r.GetInt32(1); var key=r.GetString(2);
-                        results.Add(new BiblePassage{Reference=book+" "+chapter+":"+key,RequestedReference=book+" "+chapter+":"+key,Text=r.GetString(3).Trim(),Translation=translation,Licence="User-supplied translation pack — verify redistribution rights before public release",SourceVerseKey=key});
+                        var name="@t"+i;
+                        clauses.Add("LOWER(text) LIKE "+name);
+                        cmd.Parameters.AddWithValue(name,"%"+tokens[i]+"%");
                     }
+                    cmd.CommandText="SELECT book,chapter,verse_key,text FROM verses WHERE "+string.Join(" AND ",clauses)+" ORDER BY book,chapter,verse_start LIMIT @n";
+                    cmd.Parameters.AddWithValue("@n",limit);
+                    using(var r=cmd.ExecuteReader()) while(r.Read()) AddSearchResult(results,r,translation);
                 }
             }
             return results;
+        }
+
+        private static void AddSearchResult(List<BiblePassage> results,SQLiteDataReader r,string translation)
+        {
+            var book=r.GetString(0); var chapter=r.GetInt32(1); var key=r.GetString(2);
+            results.Add(new BiblePassage{Reference=book+" "+chapter+":"+key,RequestedReference=book+" "+chapter+":"+key,Text=r.GetString(3).Trim(),Translation=translation,Licence="User-supplied translation pack — verify redistribution rights before public release",SourceVerseKey=key});
         }
 
         public BibleTranslationInfo GetTranslation(string code)=>_translations.FirstOrDefault(x=>string.Equals(x.Code,code,StringComparison.OrdinalIgnoreCase));
