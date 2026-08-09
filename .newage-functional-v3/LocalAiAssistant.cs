@@ -39,7 +39,7 @@ namespace NewAgeWorship.Desktop
                 if(completed!=wait){try{p.Kill();}catch{} return "Local AI timed out. Nothing was sent to Program.";}
                 var output=(await stdout.ConfigureAwait(false)).Trim();
                 var error=(await stderr.ConfigureAwait(false)).Trim();
-                var cleaned=Clean(output);
+                var cleaned=Clean(output,prompt);
                 if(p.ExitCode!=0)
                 {
                     var detail=!string.IsNullOrWhiteSpace(error)?FirstLine(error):(!string.IsNullOrWhiteSpace(cleaned)?FirstLine(cleaned):"exit code "+p.ExitCode);
@@ -52,21 +52,34 @@ namespace NewAgeWorship.Desktop
 
         private static string Q(string s)=>"\""+(s??"").Replace("\\","\\\\").Replace("\"","\\\"").Replace("\r"," ").Replace("\n"," ")+"\"";
         private static string FirstLine(string s){if(string.IsNullOrWhiteSpace(s))return "unknown error";var i=s.IndexOf('\n');return (i<0?s:s.Substring(0,i)).Trim();}
-        private static string Clean(string output)
+        private static string Clean(string output,string prompt)
         {
             if(string.IsNullOrWhiteSpace(output)) return "";
             var s=Regex.Replace(output,"\\x1B\\[[0-9;?]*[ -/]*[@-~]","").Trim();
             foreach(var marker in new[]{"<|im_end|>","<|im_start|>","<|assistant|>","Assistant:"}) s=s.Replace(marker,"").Trim();
+
+            // Current llama-cli can emit interactive help and then echo the supplied prompt even in single-turn/simple-io mode.
+            // Treat the exact prompt as the boundary: everything before/including its last occurrence is runtime chrome, not model output.
+            if(!string.IsNullOrWhiteSpace(prompt))
+            {
+                var promptIndex=s.LastIndexOf(prompt,StringComparison.OrdinalIgnoreCase);
+                if(promptIndex>=0) s=s.Substring(promptIndex+prompt.Length).Trim();
+            }
+
             var lines=s.Split(new[]{'\r','\n'},StringSplitOptions.RemoveEmptyEntries);
             var filtered=new System.Collections.Generic.List<string>();
             foreach(var raw in lines)
             {
                 var line=(raw??"").Trim();if(line.Length==0)continue;
-                if(line.StartsWith("Loading model",StringComparison.OrdinalIgnoreCase)||line.StartsWith("build",StringComparison.OrdinalIgnoreCase)||line.StartsWith("model",StringComparison.OrdinalIgnoreCase)||line.StartsWith("ftype",StringComparison.OrdinalIgnoreCase)||line.StartsWith("modalities",StringComparison.OrdinalIgnoreCase))continue;
+                if(line.StartsWith(">",StringComparison.Ordinal)) line=line.TrimStart('>',' ');
+                if(line.Length==0)continue;
+                if(line.StartsWith("Loading model",StringComparison.OrdinalIgnoreCase)||line.StartsWith("using custom system prompt",StringComparison.OrdinalIgnoreCase)||line.StartsWith("available commands",StringComparison.OrdinalIgnoreCase)||line.StartsWith("build",StringComparison.OrdinalIgnoreCase)||line.StartsWith("model",StringComparison.OrdinalIgnoreCase)||line.StartsWith("ftype",StringComparison.OrdinalIgnoreCase)||line.StartsWith("modalities",StringComparison.OrdinalIgnoreCase)||line.StartsWith("Exiting",StringComparison.OrdinalIgnoreCase))continue;
+                if(line.StartsWith("/exit",StringComparison.OrdinalIgnoreCase)||line.StartsWith("/regen",StringComparison.OrdinalIgnoreCase)||line.StartsWith("/clear",StringComparison.OrdinalIgnoreCase)||line.StartsWith("/read",StringComparison.OrdinalIgnoreCase)||line.StartsWith("/glob",StringComparison.OrdinalIgnoreCase))continue;
                 if(line.IndexOf("██",StringComparison.Ordinal)>=0||line.IndexOf("▄▄",StringComparison.Ordinal)>=0||line.IndexOf("▀▀",StringComparison.Ordinal)>=0)continue;
                 filtered.Add(line);
             }
             var joined=string.Join(" ",filtered).Trim();
+            joined=Regex.Replace(joined,@"\s*Exiting\.\.\.\s*$","",RegexOptions.IgnoreCase).Trim();
             return joined.Length>480?joined.Substring(0,480).Trim()+"…":joined;
         }
     }
