@@ -46,11 +46,16 @@ public static class FunctionalAcceptanceV4
         Need(AudioHealthAnalyzer.AnalyzePcm16(clipped,clipped.Length,48000,"fixture").Status=="CLIPPING","Mixer clipping detection failed");
         File.AppendAllText(report,"PASS Mixer analyzer: silence / healthy / clipping\r\n");
 
+        var prompt="Give one concise operator note: John 3:16 is prepared in Preview and still needs human approval.";
         var ai=new LocalAiAssistant(root);
         Need(ai.IsReady,"Local AI runtime/model missing");
-        var answer=ai.CompleteAsync("Give one concise operator note: John 3:16 is prepared in Preview and still needs human approval.").GetAwaiter().GetResult();
+        var answer=ai.CompleteAsync(prompt).GetAwaiter().GetResult();
         Need(!String.IsNullOrWhiteSpace(answer),"Local AI returned empty output");
         Need(answer.IndexOf("Loading model",StringComparison.OrdinalIgnoreCase)<0,"Local AI leaked startup banner");
+        Need(answer.IndexOf("available commands",StringComparison.OrdinalIgnoreCase)<0,"Local AI leaked interactive help");
+        Need(answer.IndexOf("/exit",StringComparison.OrdinalIgnoreCase)<0 && answer.IndexOf("/regen",StringComparison.OrdinalIgnoreCase)<0,"Local AI leaked command menu");
+        Need(answer.IndexOf("Exiting",StringComparison.OrdinalIgnoreCase)<0,"Local AI leaked exit banner");
+        Need(answer.IndexOf(prompt,StringComparison.OrdinalIgnoreCase)<0,"Local AI echoed the operator prompt");
         Need(answer.IndexOf("failed safely",StringComparison.OrdinalIgnoreCase)<0 && answer.IndexOf("timed out",StringComparison.OrdinalIgnoreCase)<0,"Local AI failed: "+answer);
         Need(answer.IndexOf("John",StringComparison.OrdinalIgnoreCase)>=0 || answer.IndexOf("Preview",StringComparison.OrdinalIgnoreCase)>=0 || answer.IndexOf("approval",StringComparison.OrdinalIgnoreCase)>=0,"Local AI output is not relevant operator content: "+answer);
         File.AppendAllText(report,"PASS Local AI clean inference: "+answer+"\r\n");
