@@ -1,0 +1,175 @@
+name: NEWAGE WORSHIP Redesign Visual Loop
+
+on:
+  push:
+    branches: [newage-worship-v1.0.0]
+    paths:
+      - '.github/workflows/newage-worship-redesign-loop.yml'
+      - '.newage-redesign/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reconstruct canonical source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $names=@(
+            '.newage-bootstrap/source.b64.part00',
+            '.newage-bootstrap/source.b64.part01',
+            '.newage-bootstrap/source.b64.fix020',
+            '.newage-bootstrap/source.b64.fix021',
+            '.newage-bootstrap/source.b64.part03',
+            '.newage-bootstrap/source.b64.part04',
+            '.newage-bootstrap/source.b64.part05'
+          )
+          $b64=($names|ForEach-Object{(Get-Content $_ -Raw).Trim()}) -join ''
+          $zip=Join-Path $env:RUNNER_TEMP 'NW_CODE.zip'
+          [IO.File]::WriteAllBytes($zip,[Convert]::FromBase64String($b64))
+          $hash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash -ne 'e4536533827c313e18da37f1b645ffe0532a95c5b6f1e77f77d98f86c03e8424'){throw "source hash mismatch $hash"}
+          Expand-Archive $zip . -Force
+
+      - name: Apply redesign overlay
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $b64=(Get-Content '.newage-redesign/overlay-v2.b64' -Raw).Trim()
+          $zip=Join-Path $env:RUNNER_TEMP 'redesign.zip'
+          [IO.File]::WriteAllBytes($zip,[Convert]::FromBase64String($b64))
+          $hash=(Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hash -ne 'ea3346faa458857bf7515081e466396c68c1374d5406c3aa8892ecd9949c4ac5'){throw "overlay hash mismatch $hash"}
+          Expand-Archive $zip 'NEWAGE_WORSHIP/src/NewAgeWorship.Desktop' -Force
+
+      - uses: microsoft/setup-msbuild@v2
+      - uses: NuGet/setup-nuget@v2
+        with:
+          nuget-version: '6.12.1'
+
+      - name: Build redesigned WPF application
+        shell: pwsh
+        run: |
+          msbuild 'NEWAGE_WORSHIP/NewAgeWorship.sln' /t:Restore /p:RestorePackagesConfig=true /v:minimal
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          msbuild 'NEWAGE_WORSHIP/NewAgeWorship.sln' /m /p:Configuration=Release /p:Platform="Any CPU" /v:minimal
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+
+      - name: Create real runtime capture harness
+        shell: pwsh
+        run: |
+          $code=@'
+          using System;
+          using System.IO;
+          using System.Reflection;
+          using System.Windows;
+          using System.Windows.Controls;
+          using System.Windows.Media;
+          using System.Windows.Media.Imaging;
+          using System.Windows.Threading;
+          using NewAgeWorship.Desktop;
+
+          public static class CaptureHarness
+          {
+              [STAThread]
+              public static void Main()
+              {
+                  Directory.CreateDirectory("capture");
+                  var app=new Application();
+                  var w=new MainWindow();
+                  w.Width=1440; w.Height=900; w.Left=8; w.Top=8; w.Show();
+                  Pump(900); Shot(w,"capture/01-initial.png");
+
+                  var scenes=(ListBox)w.FindName("SceneList");
+                  scenes.SelectedIndex=1; Pump(650); Shot(w,"capture/02-welcome-preview.png");
+                  Invoke(w,"TakeLive_Click"); Pump(650); Shot(w,"capture/03-welcome-live.png");
+
+                  scenes.SelectedIndex=2; Pump(650); Shot(w,"capture/04-prayer-preview.png");
+                  var command=(TextBox)w.FindName("CommandBox"); command.Text="John 3:16";
+                  Invoke(w,"ParseScripture_Click"); Pump(650); Shot(w,"capture/05-scripture-preview.png");
+                  Invoke(w,"TakeLive_Click"); Pump(650); Shot(w,"capture/06-scripture-live.png");
+
+                  Invoke(w,"Freeze_Click"); Pump(500); Shot(w,"capture/07-frozen.png");
+                  Invoke(w,"Freeze_Click"); Pump(300);
+                  Invoke(w,"Blackout_Click"); Pump(500); Shot(w,"capture/08-blackout.png");
+                  Invoke(w,"Emergency_Click"); Pump(500); Shot(w,"capture/09-emergency.png");
+                  w.Close(); app.Shutdown();
+              }
+
+              static void Invoke(MainWindow w,string name)
+              {
+                  var m=typeof(MainWindow).GetMethod(name,BindingFlags.NonPublic|BindingFlags.Instance);
+                  if(m==null) throw new Exception("missing handler "+name);
+                  m.Invoke(w,new object[]{w,new RoutedEventArgs()});
+              }
+
+              static void Pump(int ms)
+              {
+                  var frame=new DispatcherFrame();
+                  var timer=new DispatcherTimer(DispatcherPriority.Background){Interval=TimeSpan.FromMilliseconds(ms)};
+                  timer.Tick+=(s,e)=>{timer.Stop();frame.Continue=false;};
+                  timer.Start(); Dispatcher.PushFrame(frame);
+              }
+
+              static void Shot(Window w,string path)
+              {
+                  w.UpdateLayout();
+                  int width=(int)Math.Ceiling(w.ActualWidth);
+                  int height=(int)Math.Ceiling(w.ActualHeight);
+                  var bmp=new RenderTargetBitmap(width,height,96,96,PixelFormats.Pbgra32);
+                  bmp.Render(w);
+                  var enc=new PngBitmapEncoder(); enc.Frames.Add(BitmapFrame.Create(bmp));
+                  using(var fs=File.Create(path)) enc.Save(fs);
+              }
+          }
+          '@
+          Set-Content -Path 'CaptureHarness.cs' -Value $code -Encoding UTF8
+          $out=(Resolve-Path 'NEWAGE_WORSHIP/src/NewAgeWorship.Desktop/bin/Release/net48').Path
+          $csc="$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe"
+          $refDir=Join-Path ${env:ProgramFiles(x86)} 'Reference Assemblies\Microsoft\Framework\.NETFramework\v4.8'
+          & $csc /nologo /target:exe /out:"$out\CaptureHarness.exe" /reference:"$out\NewAgeWorship.exe" /reference:"$out\NewAgeWorship.Core.dll" /reference:"$refDir\WindowsBase.dll" /reference:"$refDir\PresentationCore.dll" /reference:"$refDir\PresentationFramework.dll" /reference:"$refDir\System.Xaml.dll" CaptureHarness.cs
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+
+      - name: Render redesigned runtime states
+        shell: pwsh
+        run: |
+          $dir=(Resolve-Path 'NEWAGE_WORSHIP/src/NewAgeWorship.Desktop/bin/Release/net48').Path
+          Push-Location $dir
+          & .\CaptureHarness.exe
+          $code=$LASTEXITCODE
+          Pop-Location
+          if($code -ne 0){exit $code}
+          if(-not (Test-Path "$dir\capture\09-emergency.png")){throw 'capture incomplete'}
+          New-Item -ItemType Directory -Force runtime-capture | Out-Null
+          Copy-Item "$dir\capture\*.png" runtime-capture/
+
+      - name: Assemble runtime review video
+        shell: pwsh
+        run: |
+          $lines=@()
+          Get-ChildItem runtime-capture -Filter '*.png' | Sort-Object Name | ForEach-Object {
+            $p=$_.FullName.Replace("'","''").Replace('\\','/')
+            $lines += "file '$p'"
+            $lines += 'duration 2.2'
+          }
+          $last=(Get-ChildItem runtime-capture -Filter '*.png' | Sort-Object Name | Select-Object -Last 1).FullName.Replace("'","''").Replace('\\','/')
+          $lines += "file '$last'"
+          Set-Content runtime-capture/sequence.txt $lines -Encoding ascii
+          ffmpeg -y -f concat -safe 0 -i runtime-capture/sequence.txt -vf "scale=1440:900:force_original_aspect_ratio=decrease,pad=1440:900:(ow-iw)/2:(oh-ih)/2,format=yuv420p" -r 30 -c:v libx264 -preset veryfast -crf 20 runtime-capture/NewAgeWorship-Redesign-Runtime.mp4
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NewAgeWorship-Redesign-Visual-Review
+          path: |
+            runtime-capture/*.png
+            runtime-capture/NewAgeWorship-Redesign-Runtime.mp4
+          if-no-files-found: error
+          retention-days: 7
