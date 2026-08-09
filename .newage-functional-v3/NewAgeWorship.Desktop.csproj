@@ -12,6 +12,7 @@
   <ItemGroup><ProjectReference Include="..\NewAgeWorship.Core\NewAgeWorship.Core.csproj" /></ItemGroup>
   <ItemGroup>
     <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Web" />
     <Reference Include="System.Web.Extensions" />
     <Reference Include="System.IO.Compression" />
     <Reference Include="System.IO.Compression.FileSystem" />
