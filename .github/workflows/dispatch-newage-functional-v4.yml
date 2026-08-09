@@ -13,3 +13,4 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run newage-functional-integration-loop-v4.yml --repo Veektall/LightWorship --ref newage-worship-v1.0.0
+# retry after strict AI chrome cleanup
