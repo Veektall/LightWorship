@@ -1,0 +1,74 @@
+name: Stage NEWAGE functional final video
+
+on:
+  push:
+    branches: [newage-worship-v1.0.0]
+    paths: ['.github/workflows/stage-newage-functional-final-video.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: newage-worship-v1.0.0
+          fetch-depth: 1
+
+      - name: Download final clean functional capture artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api /repos/Veektall/LightWorship/actions/artifacts/9035606092/zip > functional.zip
+          rm -rf functional && mkdir functional
+          unzip -q functional.zip -d functional
+          test -f functional/functional-capture/05-audio-voice.png
+          cat functional/functional-test-report.txt
+
+      - name: Assemble exact runtime-state review MP4
+        run: |
+          set -euo pipefail
+          cd functional/functional-capture
+          cat > sequence.txt <<'EOF'
+          file '01-ready.png'
+          duration 3.2
+          file '02-bible-lookup.png'
+          duration 4.0
+          file '03-bible-preview.png'
+          duration 4.0
+          file '04-local-ai.png'
+          duration 4.5
+          file '05-audio-voice.png'
+          duration 5.0
+          file '05-audio-voice.png'
+          EOF
+          ffmpeg -hide_banner -loglevel error -y -f concat -safe 0 -i sequence.txt -vf "scale=1440:900:force_original_aspect_ratio=decrease,pad=1440:900:(ow-iw)/2:(oh-ih)/2,format=yuv420p" -r 30 -c:v libx264 -preset medium -crf 18 -movflags +faststart NewAgeWorship-Bible-AI-Audio-Functional-Runtime.mp4
+          ffprobe -v error -show_entries format=duration,size:stream=codec_name,width,height,pix_fmt,avg_frame_rate -of default=noprint_wrappers=1 NewAgeWorship-Bible-AI-Audio-Functional-Runtime.mp4
+          sha256sum NewAgeWorship-Bible-AI-Audio-Functional-Runtime.mp4
+
+      - name: Stage exact MP4 for Gemini bridge
+        run: |
+          set -euo pipefail
+          mkdir -p .gemini-bridge/jobs
+          cp functional/functional-capture/NewAgeWorship-Bible-AI-Audio-Functional-Runtime.mp4 .gemini-bridge/jobs/NewAgeWorship-Bible-AI-Audio-Functional-Runtime.mp4
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .gemini-bridge/jobs/NewAgeWorship-Bible-AI-Audio-Functional-Runtime.mp4
+          if git diff --cached --quiet; then
+            echo 'staged media already current'
+          else
+            git commit -m 'Stage NEWAGE functional runtime for Gemini review'
+            git push origin HEAD:newage-worship-v1.0.0
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NewAgeWorship-Functional-Final-Video
+          path: functional/functional-capture/NewAgeWorship-Bible-AI-Audio-Functional-Runtime.mp4
+          if-no-files-found: error
+          retention-days: 7
