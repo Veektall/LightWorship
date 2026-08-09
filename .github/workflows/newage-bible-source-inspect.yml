@@ -1,0 +1,35 @@
+name: NEWAGE Bible source inspect
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [newage-worship-v1.0.0]
+    paths: ['.github/workflows/newage-bible-source-inspect.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download WEB VPL package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Invoke-WebRequest 'https://ebible.org/Scriptures/engwebp_vpl.zip' -OutFile bible.zip
+          Expand-Archive bible.zip bible-src -Force
+          Get-ChildItem bible-src -Recurse | Select-Object FullName,Length | Out-File bible-files.txt
+          $candidates=Get-ChildItem bible-src -Recurse -File | Where-Object {$_.Extension -in '.txt','.vpl','.sql','.csv','.tsv'}
+          foreach($f in $candidates){
+            "===== $($f.FullName) =====" | Add-Content bible-samples.txt
+            Get-Content $f.FullName -TotalCount 30 | Add-Content bible-samples.txt
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NewAgeWorship-Bible-Source-Inspect
+          path: |
+            bible-files.txt
+            bible-samples.txt
+          retention-days: 2
