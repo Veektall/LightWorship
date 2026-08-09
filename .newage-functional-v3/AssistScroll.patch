@@ -1,0 +1,8 @@
+--- a/MainWindow.xaml
++++ b/MainWindow.xaml
+@@ -352,7 +352,7 @@
+             <!-- Intelligence / Bible / audio rail -->
+             <Border Grid.Column="4" Style="{StaticResource PanelCard}">
+-                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
++                <ScrollViewer x:Name="AssistScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                     <StackPanel Margin="14">
