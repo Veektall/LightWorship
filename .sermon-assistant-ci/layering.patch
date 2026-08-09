@@ -1,0 +1,87 @@
+--- a/Program.cs
++++ b/Program.cs
+@@ -15,16 +15,33 @@
+     public sealed class ProjectionState
+     {
+         private readonly object gate = new object();
+-        private string mode = "CLEAR", title = "", body = "";
++        private string mode = "CLEAR", title = "", body = "", backgroundMode = "";
+         public event Action Changed;
+         public string Mode { get { lock (gate) return mode; } }
+         public string Title { get { lock (gate) return title; } }
+         public string Body { get { lock (gate) return body; } }
++        public string BackgroundMode { get { lock (gate) return backgroundMode; } }
+         public void Set(string m, string t, string b)
+         {
+             lock (gate) { mode = m ?? "CLEAR"; title = t ?? ""; body = b ?? ""; }
+-            Action h = Changed; if (h != null) h();
++            Fire();
+         }
++        public void SetSegment(string m, string t, string b)
++        {
++            lock (gate) { backgroundMode = m ?? ""; mode = m ?? "MEDIA"; title = t ?? ""; body = b ?? ""; }
++            Fire();
++        }
++        public void SetMedia(string m, string t, string b)
++        {
++            lock (gate) { backgroundMode = m ?? "MEDIA"; mode = m ?? "MEDIA"; title = t ?? ""; body = b ?? ""; }
++            Fire();
++        }
++        public void Clear()
++        {
++            lock (gate) { mode = "CLEAR"; title = ""; body = ""; backgroundMode = ""; }
++            Fire();
++        }
++        private void Fire(){ Action h = Changed; if (h != null) h(); }
+     }
+ 
+     public sealed class ParsedCommand
+@@ -90,12 +107,12 @@
+             string cmd=c.Command;
+             if(cmd=="HELLO") { Log("HELLO|"+Clean(c.Get("device"))); return; }
+             if(cmd=="PING") return;
+-            if(cmd=="CLEAR") state.Set("CLEAR","","");
++            if(cmd=="CLEAR") state.Clear();
+             else if(cmd=="CAPTION") state.Set("CAPTION","",c.Get("text"));
+             else if(cmd=="SCRIPTURE") { string ver=c.Get("version"); string ttl=c.Get("ref")+(ver.Length>0?" ("+ver+")":""); state.Set("SCRIPTURE",ttl,c.Get("text")); }
+             else if(cmd=="PRAYER") state.Set("PRAYER","PRAYER POINT",c.Get("text"));
+-            else if(cmd=="SEGMENT") state.Set(c.Get("name"),c.Get("title"),c.Get("body"));
+-            else if(cmd=="MEDIA") state.Set(c.Get("style").Length>0?c.Get("style"):"MEDIA",c.Get("title"),c.Get("body"));
++            else if(cmd=="SEGMENT") state.SetSegment(c.Get("name"),c.Get("title"),c.Get("body"));
++            else if(cmd=="MEDIA") state.SetMedia(c.Get("style").Length>0?c.Get("style"):"MEDIA",c.Get("title"),c.Get("body"));
+             else if(cmd=="QUIT") { Log("CONTROL|QUIT"); running=false; try{tcp.Stop();}catch{} }
+             else { Log("UNKNOWN|"+Clean(cmd)); return; }
+             Log("STATE|"+Clean(state.Mode)+"|"+Clean(state.Title)+"|"+Clean(state.Body));
+@@ -133,10 +150,11 @@
+         protected override void OnPaint(PaintEventArgs e)
+         {
+             base.OnPaint(e); Graphics g=e.Graphics;g.SmoothingMode=SmoothingMode.AntiAlias;g.TextRenderingHint=System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+-            string mode=state.Mode,title=state.Title,body=state.Body;
+-            Color a,b;Palette(mode,out a,out b); using(LinearGradientBrush bg=new LinearGradientBrush(ClientRectangle,a,b,35f))g.FillRectangle(bg,ClientRectangle);
++            string mode=state.Mode,title=state.Title,body=state.Body,backgroundMode=state.BackgroundMode;
++            string visualMode=(mode=="CAPTION" && !string.IsNullOrEmpty(backgroundMode))?backgroundMode:mode;
++            Color a,b;Palette(visualMode,out a,out b); using(LinearGradientBrush bg=new LinearGradientBrush(ClientRectangle,a,b,35f))g.FillRectangle(bg,ClientRectangle);
+             if(mode=="CLEAR")return;
+-            DrawMediaBackground(g,mode);
++            DrawMediaBackground(g,mode=="CAPTION"?backgroundMode:mode);
+             int w=ClientSize.Width,h=ClientSize.Height; Rectangle content=new Rectangle((int)(w*0.07),(int)(h*0.08),(int)(w*0.86),(int)(h*0.84));
+             if(mode=="CAPTION") {
+                 Rectangle band=new Rectangle((int)(w*0.04),(int)(h*0.70),(int)(w*0.92),(int)(h*0.22)); using(Brush overlay=new SolidBrush(Color.FromArgb(210,0,0,0)))g.FillRectangle(overlay,band);
+@@ -200,7 +218,7 @@
+             Label sl=new Label();sl.Text="Projection display:";sl.Left=20;sl.Top=145;sl.AutoSize=true;Controls.Add(sl);
+             screens=new ComboBox();screens.Left=135;screens.Top=140;screens.Width=300;screens.DropDownStyle=ComboBoxStyle.DropDownList;Controls.Add(screens);RefreshScreens();screens.SelectedIndexChanged+=delegate{MoveProjection();};
+             Button test=new Button();test.Text="Project test";test.Left=20;test.Top=190;test.Width=120;test.Height=38;test.Click+=delegate{state.Set("SCRIPTURE","John 3:16","For God so loved the world, that he gave his only begotten Son…");};Controls.Add(test);
+-            Button blank=new Button();blank.Text="Blank screen";blank.Left=150;blank.Top=190;blank.Width=120;blank.Height=38;blank.Click+=delegate{state.Set("CLEAR","","");};Controls.Add(blank);
++            Button blank=new Button();blank.Text="Blank screen";blank.Left=150;blank.Top=190;blank.Width=120;blank.Height=38;blank.Click+=delegate{state.Clear();};Controls.Add(blank);
+             Button refresh=new Button();refresh.Text="Refresh displays";refresh.Left=280;refresh.Top=190;refresh.Width=130;refresh.Height=38;refresh.Click+=delegate{RefreshScreens();MoveProjection();};Controls.Add(refresh);
+             Label ports=new Label();ports.Text="LAN discovery UDP 9076 | Projection TCP 9077 | Optional media: put OFFERING.jpg, TESTIMONY.jpg, WORSHIP.jpg, etc. beside the EXE in the media folder.";ports.Left=20;ports.Top=245;ports.Width=540;ports.Height=50;Controls.Add(ports);
+         }
+@@ -218,7 +236,7 @@
+             try {
+                 ParsedCommand p=WireProtocol.Parse("SCRIPTURE\tref=John%203%3A16\tversion=NIV\ttext=For%20God%20so%20loved");
+                 if(p.Command!="SCRIPTURE"||p.Get("ref")!="John 3:16"||p.Get("version")!="NIV"||p.Get("text")!="For God so loved")throw new Exception("protocol decode");
+-                ProjectionState s=new ProjectionState();s.Set("PRAYER","PRAYER POINT","Father, help us");if(s.Mode!="PRAYER"||s.Body.IndexOf("help")<0)throw new Exception("state update");
++                ProjectionState s=new ProjectionState();s.SetSegment("OFFERING","OFFERING","Give");s.Set("CAPTION","","Giving now");if(s.Mode!="CAPTION"||s.BackgroundMode!="OFFERING")throw new Exception("layered state");s.Set("PRAYER","PRAYER POINT","Father, help us");if(s.Mode!="PRAYER"||s.Body.IndexOf("help")<0)throw new Exception("state update");
+                 if(!string.IsNullOrEmpty(log))File.WriteAllText(log,"SELF_TEST_OK",Encoding.UTF8);return 0;
+             } catch(Exception ex){try{if(!string.IsNullOrEmpty(log))File.WriteAllText(log,"SELF_TEST_FAIL: "+ex.Message,Encoding.UTF8);}catch{}return 2;}
+         }
