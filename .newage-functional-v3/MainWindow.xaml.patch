@@ -1,16 +1,16 @@
 --- a/MainWindow.xaml
 +++ b/MainWindow.xaml
-
-@@ -198,5 +198,5 @@
-
+@@ -197,7 +197,7 @@
+                 <ColumnDefinition Width="14"/>
                  <ColumnDefinition Width="*"/>
                  <ColumnDefinition Width="14"/>
 -                <ColumnDefinition Width="274"/>
 +                <ColumnDefinition Width="310"/>
              </Grid.ColumnDefinitions>
  
-@@ -350,17 +350,77 @@
-
+             <!-- Run of service -->
+@@ -349,19 +349,79 @@
+                 </Border>
              </Grid>
  
 -            <!-- Quick actions -->
@@ -98,8 +98,9 @@
 +                        <Border Height="1" Background="{StaticResource Line}" Margin="0,16,0,14"/>
  
                          <DockPanel Margin="0,0,0,8">
-@@ -372,18 +432,9 @@
-
+                             <TextBlock Text="Phone remote" FontSize="13" FontWeight="SemiBold"/>
+@@ -371,20 +431,11 @@
+                         </DockPanel>
                          <TextBlock Text="PAIRING TOKEN" Style="{StaticResource SectionTitle}" FontSize="9" Margin="0,2,0,5"/>
                          <TextBox x:Name="PhoneToken" IsReadOnly="True" FontFamily="Consolas"/>
 -                        <TextBlock Text="Use PHONE in the header to start or stop the local remote." TextWrapping="Wrap" Foreground="{StaticResource Muted}" FontSize="11" Margin="2,7,2,0"/>
@@ -120,3 +121,4 @@
 -                            </StackPanel>
                          </Border>
                      </StackPanel>
+                 </ScrollViewer>
