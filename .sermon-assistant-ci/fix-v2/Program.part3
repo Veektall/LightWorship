@@ -1,0 +1,70 @@
+        private readonly ProjectionState state;
+        private readonly string mediaDir;
+        public ProjectionForm(ProjectionState s)
+        {
+            state=s; mediaDir=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"media");
+            FormBorderStyle=FormBorderStyle.None; ShowInTaskbar=false; TopMost=false; BackColor=Color.Black; DoubleBuffered=true; Cursor=Cursors.Default; KeyPreview=true;
+            KeyDown += delegate(object sender, KeyEventArgs e){ if(e.KeyCode==Keys.Escape || e.KeyCode==Keys.F12){ e.Handled=true; Close(); } };
+            MouseDoubleClick += delegate{ Close(); };
+            state.Changed += OnStateChanged;
+        }
+        public void MoveToScreen(Screen screen){ if(screen==null)return; StartPosition=FormStartPosition.Manual; Bounds=screen.Bounds; WindowState=FormWindowState.Normal; Bounds=screen.Bounds; }
+        private void OnStateChanged(){ if(IsDisposed)return; try{if(InvokeRequired)BeginInvoke((MethodInvoker)delegate{Invalidate();});else Invalidate();}catch{} }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            base.OnPaint(e); Graphics g=e.Graphics;g.SmoothingMode=SmoothingMode.AntiAlias;g.TextRenderingHint=System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
+            string mode=state.Mode,title=state.Title,body=state.Body,backgroundMode=state.BackgroundMode;
+            string visualMode=(mode=="CAPTION" && !string.IsNullOrEmpty(backgroundMode))?backgroundMode:mode;
+            Color a,b;Palette(visualMode,out a,out b); using(LinearGradientBrush bg=new LinearGradientBrush(ClientRectangle,a,b,35f))g.FillRectangle(bg,ClientRectangle);
+            if(mode=="CLEAR")return;
+            DrawMediaBackground(g,mode=="CAPTION"?backgroundMode:mode);
+            int w=ClientSize.Width,h=ClientSize.Height; Rectangle content=new Rectangle((int)(w*0.07),(int)(h*0.08),(int)(w*0.86),(int)(h*0.84));
+            if(mode=="CAPTION") {
+                Rectangle band=new Rectangle((int)(w*0.04),(int)(h*0.70),(int)(w*0.92),(int)(h*0.22)); using(Brush overlay=new SolidBrush(Color.FromArgb(210,0,0,0)))g.FillRectangle(overlay,band);
+                DrawFit(g,body,new Rectangle(band.X+30,band.Y+20,band.Width-60,band.Height-40),Math.Max(24,w/28),FontStyle.Bold,StringAlignment.Center);
+                return;
+            }
+            if(title.Length>0) DrawFit(g,title,new Rectangle(content.X,content.Y,content.Width,(int)(content.Height*0.22)),Math.Max(30,w/22),FontStyle.Bold,StringAlignment.Center);
+            Rectangle bodyRect=new Rectangle(content.X,content.Y+(int)(content.Height*0.24),content.Width,(int)(content.Height*0.70));
+            DrawFit(g,body,bodyRect,Math.Max(28,w/30),FontStyle.Regular,StringAlignment.Center);
+            using(Pen p=new Pen(Color.FromArgb(150,255,255,255),2))g.DrawLine(p,content.X+(int)(content.Width*.2),content.Y+(int)(content.Height*.225),content.Right-(int)(content.Width*.2),content.Y+(int)(content.Height*.225));
+        }
+        private void DrawMediaBackground(Graphics g,string mode)
+        {
+            try {
+                string[] ext={".jpg",".jpeg",".png",".bmp"}; string file=null;
+                for(int i=0;i<ext.Length;i++){string p=Path.Combine(mediaDir,(mode??"MEDIA").ToUpperInvariant()+ext[i]);if(File.Exists(p)){file=p;break;}}
+                if(file==null)return;
+                using(Image img=Image.FromFile(file)){
+                    Rectangle dst=ClientRectangle; float scale=Math.Max(dst.Width/(float)img.Width,dst.Height/(float)img.Height);
+                    int sw=(int)(dst.Width/scale), sh=(int)(dst.Height/scale); int sx=Math.Max(0,(img.Width-sw)/2), sy=Math.Max(0,(img.Height-sh)/2);
+                    g.DrawImage(img,dst,new Rectangle(sx,sy,Math.Min(sw,img.Width),Math.Min(sh,img.Height)),GraphicsUnit.Pixel);
+                }
+                using(Brush shade=new SolidBrush(Color.FromArgb(115,0,0,0)))g.FillRectangle(shade,ClientRectangle);
+            } catch { }
+        }
+
+        private static void DrawFit(Graphics g,string text,Rectangle r,int start,FontStyle style,StringAlignment align)
+        {
+            if(string.IsNullOrEmpty(text))return; int size=start; Font f=null; SizeF m;
+            do { if(f!=null)f.Dispose(); f=new Font("Arial",size,style,GraphicsUnit.Pixel); m=g.MeasureString(text,f,r.Width); if(m.Height<=r.Height)break; size-=2; } while(size>=18);
+            using(f) using(Brush br=new SolidBrush(Color.White)) { StringFormat sf=new StringFormat();sf.Alignment=align;sf.LineAlignment=StringAlignment.Center;sf.Trimming=StringTrimming.EllipsisWord;g.DrawString(text,f,br,r,sf);sf.Dispose(); }
+        }
+        private static void Palette(string mode,out Color a,out Color b)
+        {
+            string m=(mode??"").ToUpperInvariant();
+            if(m=="SCRIPTURE"){a=Color.FromArgb(24,49,83);b=Color.FromArgb(48,90,130);}
+            else if(m=="PRAYER"){a=Color.FromArgb(61,29,76);b=Color.FromArgb(112,55,126);}
+            else if(m=="OFFERING"){a=Color.FromArgb(33,75,45);b=Color.FromArgb(75,119,70);}
+            else if(m=="TESTIMONY"){a=Color.FromArgb(98,64,15);b=Color.FromArgb(173,119,28);}
+            else if(m=="WORSHIP"||m=="PRAISE"){a=Color.FromArgb(49,25,95);b=Color.FromArgb(97,58,150);}
+            else if(m=="ALTAR_CALL"){a=Color.FromArgb(87,26,26);b=Color.FromArgb(150,52,52);}
+            else {a=Color.FromArgb(18,45,67);b=Color.FromArgb(32,75,103);}
+        }
+    }
+
+    public sealed class ControlForm : Form
+    {
+        private readonly ProjectionState state=new ProjectionState();
+        private readonly ProjectorServer server;
+        private ProjectionForm projection;
