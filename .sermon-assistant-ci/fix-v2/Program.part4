@@ -1,0 +1,70 @@
+        private Label status, projectionStatus;
+        private ComboBox screens;
+        private Button startProjectionButton, stopProjectionButton;
+
+        public ControlForm()
+        {
+            Text="Sermon Assistant Companion";Width=690;Height=430;MinimumSize=new Size(640,390);StartPosition=FormStartPosition.CenterScreen;BackColor=Color.White;Font=new Font("Segoe UI",9f);
+            server=new ProjectorServer(state,9077,null);server.StatusChanged+=UpdateStatus;
+            BuildUi();
+            Load+=delegate{
+                try{Directory.CreateDirectory(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"media"));}catch{}
+                server.Start();
+                RefreshScreens();
+                UpdateStatus();
+                UpdateProjectionStatus();
+            };
+            FormClosing+=delegate{server.Stop();StopProjection();};
+        }
+
+        private void BuildUi()
+        {
+            Label title=new Label();title.Text="SERMON ASSISTANT — WINDOWS 7 PROJECTION COMPANION";title.Font=new Font("Segoe UI",14f,FontStyle.Bold);title.AutoSize=true;title.Left=18;title.Top=18;Controls.Add(title);
+            Label info=new Label();info.Text="Connect this PC to the big screen by HDMI and set Windows to EXTEND displays. The projection window no longer opens automatically.";info.Left=20;info.Top=55;info.Width=640;info.Height=35;Controls.Add(info);
+            status=new Label();status.Left=20;status.Top=92;status.Width=640;status.Height=45;status.Font=new Font("Segoe UI",10f,FontStyle.Bold);Controls.Add(status);
+            Label sl=new Label();sl.Text="Projection display:";sl.Left=20;sl.Top=150;sl.AutoSize=true;Controls.Add(sl);
+            screens=new ComboBox();screens.Left=140;screens.Top=145;screens.Width=350;screens.DropDownStyle=ComboBoxStyle.DropDownList;Controls.Add(screens);screens.SelectedIndexChanged+=delegate{if(projection!=null&&!projection.IsDisposed)MoveProjection();};
+
+            startProjectionButton=new Button();startProjectionButton.Text="START PROJECTION";startProjectionButton.Left=20;startProjectionButton.Top=195;startProjectionButton.Width=145;startProjectionButton.Height=40;startProjectionButton.Click+=delegate{StartProjection();};Controls.Add(startProjectionButton);
+            stopProjectionButton=new Button();stopProjectionButton.Text="STOP / RESTORE";stopProjectionButton.Left=175;stopProjectionButton.Top=195;stopProjectionButton.Width=135;stopProjectionButton.Height=40;stopProjectionButton.Click+=delegate{StopProjection();};Controls.Add(stopProjectionButton);
+            Button test=new Button();test.Text="Project test";test.Left=320;test.Top=195;test.Width=110;test.Height=40;test.Click+=delegate{state.Set("SCRIPTURE","John 3:16","For God so loved the world, that he gave his only begotten Son…");};Controls.Add(test);
+            Button blank=new Button();blank.Text="Blank screen";blank.Left=440;blank.Top=195;blank.Width=110;blank.Height=40;blank.Click+=delegate{state.Clear();};Controls.Add(blank);
+            Button refresh=new Button();refresh.Text="Refresh displays";refresh.Left=560;refresh.Top=195;refresh.Width=105;refresh.Height=40;refresh.Click+=delegate{RefreshScreens();};Controls.Add(refresh);
+
+            projectionStatus=new Label();projectionStatus.Left=20;projectionStatus.Top=248;projectionStatus.Width=640;projectionStatus.Height=38;projectionStatus.Font=new Font("Segoe UI",9f,FontStyle.Bold);projectionStatus.ForeColor=Color.FromArgb(18,52,86);Controls.Add(projectionStatus);
+            Label rescue=new Label();rescue.Text="Safety: projection starts only when you click START PROJECTION. Press Esc or F12 to close the projection window immediately. Double-clicking the projection also closes it.";rescue.Left=20;rescue.Top=285;rescue.Width=640;rescue.Height=42;Controls.Add(rescue);
+            Label ports=new Label();ports.Text="LAN discovery UDP 9076 | Projection TCP 9077 | Optional media: put OFFERING.jpg, TESTIMONY.jpg, WORSHIP.jpg, etc. in the media folder beside the EXE.";ports.Left=20;ports.Top=335;ports.Width=640;ports.Height=45;Controls.Add(ports);
+        }
+
+        private void RefreshScreens()
+        {
+            int old=screens==null?-1:screens.SelectedIndex;if(screens==null)return;
+            screens.Items.Clear();Screen[] all=Screen.AllScreens;
+            for(int i=0;i<all.Length;i++)screens.Items.Add((i+1)+": "+all[i].DeviceName+(all[i].Primary?" (Primary)":" (Recommended projector)"));
+            int preferred=0;for(int i=0;i<all.Length;i++)if(!all[i].Primary){preferred=i;break;}
+            screens.SelectedIndex=(old>=0&&old<all.Length)?old:preferred;
+            UpdateProjectionStatus();
+        }
+
+        private Screen SelectedScreen()
+        {
+            Screen[] all=Screen.AllScreens;
+            if(screens==null||screens.SelectedIndex<0||screens.SelectedIndex>=all.Length)return all.Length>0?all[0]:null;
+            return all[screens.SelectedIndex];
+        }
+
+        private void StartProjection()
+        {
+            Screen target=SelectedScreen();if(target==null){MessageBox.Show("No display was detected.","Sermon Assistant",MessageBoxButtons.OK,MessageBoxIcon.Warning);return;}
+            if(target.Primary)
+            {
+                DialogResult answer=MessageBox.Show("The selected display is the PRIMARY Windows screen. Projection will cover that screen.\r\n\r\nFor church use, connect HDMI and choose Extend so a second display appears.\r\n\r\nIf you continue on the primary screen, press Esc or F12 to close projection. Continue?","Primary display selected",MessageBoxButtons.YesNo,MessageBoxIcon.Warning);
+                if(answer!=DialogResult.Yes)return;
+            }
+            if(projection==null||projection.IsDisposed)
+            {
+                projection=new ProjectionForm(state);
+                projection.FormClosed+=delegate{projection=null;UpdateProjectionStatus();};
+                projection.Show();
+            }
+            MoveProjection();projection.Show();projection.BringToFront();UpdateProjectionStatus();
