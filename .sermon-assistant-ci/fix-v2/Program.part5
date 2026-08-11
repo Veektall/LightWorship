@@ -1,0 +1,55 @@
+        }
+
+        private void StopProjection()
+        {
+            ProjectionForm p=projection;projection=null;
+            if(p!=null&&!p.IsDisposed){try{p.Close();}catch{}}
+            UpdateProjectionStatus();
+        }
+
+        private void MoveProjection()
+        {
+            if(projection==null||projection.IsDisposed)return;Screen target=SelectedScreen();if(target!=null)projection.MoveToScreen(target);UpdateProjectionStatus();
+        }
+
+        private void UpdateProjectionStatus()
+        {
+            if(projectionStatus==null)return;
+            bool open=projection!=null&&!projection.IsDisposed;
+            Screen target=SelectedScreen();string where=target==null?"no display":target.DeviceName+(target.Primary?" (Primary)":" (Secondary)");
+            projectionStatus.Text=open?"Projection: ON → "+where:"Projection: OFF — operator window is safe to use";
+            if(startProjectionButton!=null)startProjectionButton.Enabled=!open;
+            if(stopProjectionButton!=null)stopProjectionButton.Enabled=open;
+        }
+
+        private void UpdateStatus(){if(IsDisposed)return;try{if(InvokeRequired){BeginInvoke((MethodInvoker)UpdateStatus);return;}status.Text="Listening on TCP 9077 • Client: "+server.LastClient+"\r\nPC IPv4: "+LocalIps();status.ForeColor=server.Running?Color.DarkGreen:Color.DarkRed;}catch{}}
+        private static string LocalIps(){List<string> ips=new List<string>();try{foreach(NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())if(ni.OperationalStatus==OperationalStatus.Up)foreach(UnicastIPAddressInformation u in ni.GetIPProperties().UnicastAddresses)if(u.Address.AddressFamily==AddressFamily.InterNetwork&&!IPAddress.IsLoopback(u.Address))ips.Add(u.Address.ToString());}catch{}return ips.Count==0?"unknown":string.Join(", ",ips.ToArray());}
+    }
+
+    public static class SelfTest
+    {
+        public static int Run(string log)
+        {
+            try {
+                ParsedCommand p=WireProtocol.Parse("SCRIPTURE\tref=John%203%3A16\tversion=NIV\ttext=For%20God%20so%20loved");
+                if(p.Command!="SCRIPTURE"||p.Get("ref")!="John 3:16"||p.Get("version")!="NIV"||p.Get("text")!="For God so loved")throw new Exception("protocol decode");
+                ProjectionState s=new ProjectionState();s.SetSegment("OFFERING","OFFERING","Give");s.Set("CAPTION","","Giving now");if(s.Mode!="CAPTION"||s.BackgroundMode!="OFFERING")throw new Exception("layered state");s.Set("PRAYER","PRAYER POINT","Father, help us");if(s.Mode!="PRAYER"||s.Body.IndexOf("help")<0)throw new Exception("state update");
+                if(!string.IsNullOrEmpty(log))File.WriteAllText(log,"SELF_TEST_OK",Encoding.UTF8);return 0;
+            } catch(Exception ex){try{if(!string.IsNullOrEmpty(log))File.WriteAllText(log,"SELF_TEST_FAIL: "+ex.Message,Encoding.UTF8);}catch{}return 2;}
+        }
+    }
+
+    static class Program
+    {
+        [STAThread]
+        static void Main(string[] args)
+        {
+            string selfLog=Arg(args,"--self-test-log",null); if(Has(args,"--self-test")){Environment.Exit(SelfTest.Run(selfLog));return;}
+            if(Has(args,"--headless")) { int port=IntArg(args,"--port",19077);string log=Arg(args,"--log","sermon-companion-headless.log");int exit=IntArg(args,"--exit-after",30);ProjectionState s=new ProjectionState();ProjectorServer srv=new ProjectorServer(s,port,log);srv.Start();DateTime end=DateTime.UtcNow.AddSeconds(exit);while(srv.Running&&DateTime.UtcNow<end)Thread.Sleep(100);srv.Stop();return; }
+            Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false); Application.Run(new ControlForm());
+        }
+        static bool Has(string[] a,string k){for(int i=0;i<a.Length;i++)if(string.Equals(a[i],k,StringComparison.OrdinalIgnoreCase))return true;return false;}
+        static string Arg(string[] a,string k,string d){for(int i=0;i+1<a.Length;i++)if(string.Equals(a[i],k,StringComparison.OrdinalIgnoreCase))return a[i+1];return d;}
+        static int IntArg(string[] a,string k,int d){int v;return int.TryParse(Arg(a,k,d.ToString()),out v)?v:d;}
+    }
+}
