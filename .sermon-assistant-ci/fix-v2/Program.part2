@@ -1,0 +1,70 @@
+        public bool Running { get { return running; } }
+        public string LastClient = "none";
+        public event Action StatusChanged;
+        public ProjectorServer(ProjectionState s, int p, string log) { state=s;port=p;logPath=log; }
+        public void Start()
+        {
+            if (running) return; running=true;
+            tcp = new TcpListener(IPAddress.Any, port); tcp.Start();
+            tcpThread=new Thread(TcpLoop);tcpThread.IsBackground=true;tcpThread.Start();
+            if (port == 9077) { udpThread=new Thread(UdpLoop);udpThread.IsBackground=true;udpThread.Start(); }
+            Notify(); Log("SERVER|START|"+port);
+        }
+        public void Stop()
+        {
+            running=false; try{if(tcp!=null)tcp.Stop();}catch{} try{if(udp!=null)udp.Close();}catch{} Notify(); Log("SERVER|STOP");
+        }
+        private void TcpLoop()
+        {
+            while(running) {
+                try { TcpClient client=tcp.AcceptTcpClient(); Thread t=new Thread(delegate(){HandleClient(client);});t.IsBackground=true;t.Start(); }
+                catch { if(!running)break; Thread.Sleep(100); }
+            }
+        }
+        private void HandleClient(TcpClient client)
+        {
+            try {
+                client.NoDelay=true; IPEndPoint ep=client.Client.RemoteEndPoint as IPEndPoint; LastClient=ep==null?"client":ep.Address.ToString(); Notify();
+                using(client) using(StreamReader r=new StreamReader(client.GetStream(),new UTF8Encoding(false))) using(StreamWriter w=new StreamWriter(client.GetStream(),new UTF8Encoding(false))) {
+                    w.AutoFlush=true; string line;
+                    while(running && (line=r.ReadLine())!=null) { if(line.Length==0)continue; ParsedCommand c=WireProtocol.Parse(line); Apply(c); w.WriteLine("OK"); if(c.Command=="QUIT")break; }
+                }
+            } catch(Exception ex) { Log("CLIENT|ERROR|"+Clean(ex.Message)); }
+            finally { LastClient="none";Notify(); }
+        }
+        private void Apply(ParsedCommand c)
+        {
+            string cmd=c.Command;
+            if(cmd=="HELLO") { Log("HELLO|"+Clean(c.Get("device"))); return; }
+            if(cmd=="PING") return;
+            if(cmd=="CLEAR") state.Clear();
+            else if(cmd=="CAPTION") state.Set("CAPTION","",c.Get("text"));
+            else if(cmd=="SCRIPTURE") { string ver=c.Get("version"); string ttl=c.Get("ref")+(ver.Length>0?" ("+ver+")":""); state.Set("SCRIPTURE",ttl,c.Get("text")); }
+            else if(cmd=="PRAYER") state.Set("PRAYER","PRAYER POINT",c.Get("text"));
+            else if(cmd=="SEGMENT") state.SetSegment(c.Get("name"),c.Get("title"),c.Get("body"));
+            else if(cmd=="MEDIA") state.SetMedia(c.Get("style").Length>0?c.Get("style"):"MEDIA",c.Get("title"),c.Get("body"));
+            else if(cmd=="QUIT") { Log("CONTROL|QUIT"); running=false; try{tcp.Stop();}catch{} }
+            else { Log("UNKNOWN|"+Clean(cmd)); return; }
+            Log("STATE|"+Clean(state.Mode)+"|"+Clean(state.Title)+"|"+Clean(state.Body));
+        }
+        private void UdpLoop()
+        {
+            try {
+                udp=new UdpClient(9076); udp.EnableBroadcast=true; IPEndPoint any=new IPEndPoint(IPAddress.Any,0);
+                while(running) {
+                    byte[] data=udp.Receive(ref any); string q=Encoding.UTF8.GetString(data);
+                    if(q.Trim()=="SERMON_ASSISTANT_DISCOVER_V1") { string resp="SERMON_ASSISTANT_COMPANION_V1|"+Environment.MachineName+"|9077"; byte[] b=Encoding.UTF8.GetBytes(resp);udp.Send(b,b.Length,any); }
+                }
+            } catch { }
+        }
+        private void Notify(){Action h=StatusChanged;if(h!=null)h();}
+        private static string Clean(string s){return (s??"").Replace("\r"," ").Replace("\n"," ").Replace("|","/");}
+        private void Log(string s)
+        {
+            if(string.IsNullOrEmpty(logPath))return;
+            try{lock(this){File.AppendAllText(logPath,DateTime.UtcNow.ToString("o")+"|"+s+Environment.NewLine,Encoding.UTF8);}}catch{}
+        }
+    }
+
+    public sealed class ProjectionForm : Form
+    {
