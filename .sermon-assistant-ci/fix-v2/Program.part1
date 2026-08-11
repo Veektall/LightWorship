@@ -1,0 +1,70 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.IO;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading;
+using System.Windows.Forms;
+
+namespace SermonAssistantCompanion
+{
+    public sealed class ProjectionState
+    {
+        private readonly object gate = new object();
+        private string mode = "CLEAR", title = "", body = "", backgroundMode = "";
+        public event Action Changed;
+        public string Mode { get { lock (gate) return mode; } }
+        public string Title { get { lock (gate) return title; } }
+        public string Body { get { lock (gate) return body; } }
+        public string BackgroundMode { get { lock (gate) return backgroundMode; } }
+        public void Set(string m, string t, string b)
+        {
+            lock (gate) { mode = m ?? "CLEAR"; title = t ?? ""; body = b ?? ""; }
+            Fire();
+        }
+        public void SetSegment(string m, string t, string b)
+        {
+            lock (gate) { backgroundMode = m ?? ""; mode = m ?? "MEDIA"; title = t ?? ""; body = b ?? ""; }
+            Fire();
+        }
+        public void SetMedia(string m, string t, string b)
+        {
+            lock (gate) { backgroundMode = m ?? "MEDIA"; mode = m ?? "MEDIA"; title = t ?? ""; body = b ?? ""; }
+            Fire();
+        }
+        public void Clear()
+        {
+            lock (gate) { mode = "CLEAR"; title = ""; body = ""; backgroundMode = ""; }
+            Fire();
+        }
+        private void Fire(){ Action h = Changed; if (h != null) h(); }
+    }
+
+    public sealed class ParsedCommand
+    {
+        public string Command;
+        public Dictionary<string,string> Fields = new Dictionary<string,string>(StringComparer.OrdinalIgnoreCase);
+        public string Get(string key) { string v; return Fields.TryGetValue(key, out v) ? v : ""; }
+    }
+
+    public static class WireProtocol
+    {
+        public static string Decode(string s) { try { return Uri.UnescapeDataString((s ?? "").Replace("+", "%20")); } catch { return s ?? ""; } }
+        public static ParsedCommand Parse(string line)
+        {
+            if (line == null) throw new ArgumentNullException("line");
+            string[] p = line.TrimEnd('\r','\n').Split('\t');
+            ParsedCommand c = new ParsedCommand(); c.Command = p.Length == 0 ? "" : p[0].Trim().ToUpperInvariant();
+            for (int i=1;i<p.Length;i++) { int eq=p[i].IndexOf('='); if(eq<=0) continue; c.Fields[p[i].Substring(0,eq)] = Decode(p[i].Substring(eq+1)); }
+            return c;
+        }
+    }
+
+    public sealed class ProjectorServer
+    {
+        private readonly ProjectionState state; private readonly int port; private readonly string logPath;
+        private TcpListener tcp; private UdpClient udp; private Thread tcpThread, udpThread; private volatile bool running;
