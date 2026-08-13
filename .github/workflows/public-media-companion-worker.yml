@@ -1,0 +1,94 @@
+name: Public Media Companion Worker
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: public-media-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  media:
+    if: github.actor == github.repository_owner && startsWith(github.event.issue.title, 'public-media-worker:')
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Parse constrained request
+        id: req
+        env:
+          BODY: ${{ github.event.issue.body }}
+        run: |
+          python - <<'PY'
+          import json, os, re
+          data=json.loads(os.environ.get('BODY','').strip())
+          url=data.get('url','')
+          task=data.get('task','probe')
+          language=data.get('language','en')
+          if task not in {'probe','audio-normalize','transcribe'}:
+              raise SystemExit('unsupported task')
+          if not re.match(r'^https://', url):
+              raise SystemExit('only public https URLs are accepted')
+          if not re.fullmatch(r'[A-Za-z0-9._-]{1,16}', language):
+              raise SystemExit('invalid language')
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:
+              f.write(f'url={url}\ntask={task}\nlanguage={language}\n')
+          PY
+      - name: Download public media
+        env:
+          URL: ${{ steps.req.outputs.url }}
+        run: |
+          curl -L --fail --retry 3 --max-time 900 "$URL" -o input.media
+          test -s input.media
+          test "$(stat -c%s input.media)" -le 1073741824
+      - name: Install media tools
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Probe
+        if: steps.req.outputs.task == 'probe'
+        run: ffprobe -v error -show_format -show_streams input.media > media-probe.txt
+      - name: Normalize audio
+        if: steps.req.outputs.task == 'audio-normalize'
+        run: ffmpeg -y -i input.media -vn -ac 1 -ar 16000 -c:a pcm_s16le normalized.wav
+      - name: Transcribe public audio
+        if: steps.req.outputs.task == 'transcribe'
+        env:
+          LANG: ${{ steps.req.outputs.language }}
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install faster-whisper
+          ffmpeg -y -i input.media -vn -ac 1 -ar 16000 normalized.wav
+          cat > /tmp/transcribe.py <<'PY'
+          from faster_whisper import WhisperModel
+          import os
+          model=WhisperModel('base', device='cpu', compute_type='int8', cpu_threads=4)
+          segs,info=model.transcribe('normalized.wav', language=os.environ.get('LANG') or None, vad_filter=True)
+          with open('transcript.txt','w',encoding='utf-8') as f:
+              for s in segs:
+                  f.write(f'[{s.start:.2f}-{s.end:.2f}] {s.text.strip()}\n')
+          with open('transcription-metadata.txt','w') as f:
+              f.write(f'language={info.language}\nprobability={info.language_probability}\nduration={info.duration}\n')
+          PY
+          python /tmp/transcribe.py
+      - name: Collect outputs
+        if: always()
+        run: |
+          mkdir -p out
+          for f in media-probe.txt normalized.wav transcript.txt transcription-metadata.txt; do [ ! -f "$f" ] || cp "$f" out/; done
+      - name: Upload result
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-media-result-${{ github.run_id }}
+          path: out/
+          retention-days: 1
+      - name: Report
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "Public media worker finished with status: ${{ job.status }}. Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
