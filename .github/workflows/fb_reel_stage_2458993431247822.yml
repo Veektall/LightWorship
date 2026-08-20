@@ -9,6 +9,8 @@ on:
 
 permissions:
   contents: write
+  issues: write
+  actions: read
 
 jobs:
   stage:
@@ -29,6 +31,7 @@ jobs:
           mkdir -p .gemini-bridge/jobs
           URL='https://www.facebook.com/reel/2458993431247822?sfnsn=scwspwa&mibextid=6AJuK9'
           OUT='.gemini-bridge/jobs/facebook-reel-2458993431247822.mp4'
+          rm -f "$OUT"
           yt-dlp --no-playlist --recode-video mp4 --max-filesize 95M -o '.gemini-bridge/jobs/facebook-reel-2458993431247822.%(ext)s' "$URL"
           FOUND=$(find .gemini-bridge/jobs -maxdepth 1 -type f -name 'facebook-reel-2458993431247822.*' ! -name '*.status.txt' | head -n 1)
           if [ "$FOUND" != "$OUT" ]; then mv "$FOUND" "$OUT"; fi
@@ -39,6 +42,14 @@ jobs:
             echo "sha256=$(sha256sum "$OUT" | awk '{print $1}')"
             ffprobe -v error -show_entries format=duration,size -of default=nw=1 "$OUT" || true
           } > .gemini-bridge/jobs/facebook-reel-2458993431247822.status.txt
+      - name: Upload workspace artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: facebook-reel-2458993431247822
+          path: |
+            .gemini-bridge/jobs/facebook-reel-2458993431247822.mp4
+            .gemini-bridge/jobs/facebook-reel-2458993431247822.status.txt
+          if-no-files-found: error
       - name: Commit staged media
         shell: bash
         run: |
@@ -46,5 +57,12 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add .gemini-bridge/jobs/facebook-reel-2458993431247822.mp4 .gemini-bridge/jobs/facebook-reel-2458993431247822.status.txt
-          git commit -m 'Stage Facebook reel 2458993431247822 for Gemini'
-          git push origin HEAD:gemini-fb-2458993431247822
+          if ! git diff --cached --quiet; then
+            git commit -m 'Refresh Facebook reel 2458993431247822 staging'
+            git push origin HEAD:gemini-fb-2458993431247822
+          fi
+      - name: Publish run id
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --repo Veektall/LightWorship --title "fb-stage-run:2458993431247822:${{ github.run_id }}" --body "run_id=${{ github.run_id }}\nartifact=facebook-reel-2458993431247822\nsha=${{ github.sha }}"
