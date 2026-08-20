@@ -1,0 +1,50 @@
+name: Stage Facebook Reel 2458993431247822
+
+on:
+  push:
+    branches:
+      - gemini-fb-2458993431247822
+    paths:
+      - .github/workflows/fb_reel_stage_2458993431247822.yml
+
+permissions:
+  contents: write
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gemini-fb-2458993431247822
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install downloader
+        run: python -m pip install --upgrade yt-dlp
+      - name: Download full public reel with audio
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .gemini-bridge/jobs
+          URL='https://www.facebook.com/reel/2458993431247822?sfnsn=scwspwa&mibextid=6AJuK9'
+          OUT='.gemini-bridge/jobs/facebook-reel-2458993431247822.mp4'
+          yt-dlp --no-playlist --recode-video mp4 --max-filesize 95M -o '.gemini-bridge/jobs/facebook-reel-2458993431247822.%(ext)s' "$URL"
+          FOUND=$(find .gemini-bridge/jobs -maxdepth 1 -type f -name 'facebook-reel-2458993431247822.*' ! -name '*.status.txt' | head -n 1)
+          if [ "$FOUND" != "$OUT" ]; then mv "$FOUND" "$OUT"; fi
+          test -s "$OUT"
+          {
+            echo 'status=ok'
+            echo "bytes=$(stat -c%s "$OUT")"
+            echo "sha256=$(sha256sum "$OUT" | awk '{print $1}')"
+            ffprobe -v error -show_entries format=duration,size -of default=nw=1 "$OUT" || true
+          } > .gemini-bridge/jobs/facebook-reel-2458993431247822.status.txt
+      - name: Commit staged media
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .gemini-bridge/jobs/facebook-reel-2458993431247822.mp4 .gemini-bridge/jobs/facebook-reel-2458993431247822.status.txt
+          git commit -m 'Stage Facebook reel 2458993431247822 for Gemini'
+          git push origin HEAD:gemini-fb-2458993431247822
