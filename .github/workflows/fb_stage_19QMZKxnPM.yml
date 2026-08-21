@@ -1,0 +1,71 @@
+name: Stage Facebook Video 19QMZKxnPM
+
+on:
+  push:
+    branches:
+      - gemini-fb-19QMZKxnPM
+    paths:
+      - .github/workflows/fb_stage_19QMZKxnPM.yml
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gemini-fb-19QMZKxnPM
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install downloader
+        run: python -m pip install --upgrade yt-dlp
+      - name: Download full public video with audio and metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .gemini-bridge/jobs
+          URL='https://www.facebook.com/share/v/19QMZKxnPM/'
+          OUT='.gemini-bridge/jobs/facebook-video-19QMZKxnPM.mp4'
+          rm -f .gemini-bridge/jobs/facebook-video-19QMZKxnPM.*
+          yt-dlp --no-playlist --write-info-json --write-thumbnail --convert-thumbnails jpg --write-subs --write-auto-subs --sub-langs 'en.*,en_US,en' --sub-format 'srt/best' --convert-subs srt --recode-video mp4 --max-filesize 95M -o '.gemini-bridge/jobs/facebook-video-19QMZKxnPM.%(ext)s' "$URL"
+          FOUND=$(find .gemini-bridge/jobs -maxdepth 1 -type f -name 'facebook-video-19QMZKxnPM.*' \( -name '*.mp4' -o -name '*.webm' -o -name '*.mkv' \) | head -n 1)
+          if [ "$FOUND" != "$OUT" ]; then mv "$FOUND" "$OUT"; fi
+          test -s "$OUT"
+          {
+            echo 'status=ok'
+            echo "bytes=$(stat -c%s "$OUT")"
+            echo "sha256=$(sha256sum "$OUT" | awk '{print $1}')"
+            ffprobe -v error -show_entries format=duration,size -of default=nw=1 "$OUT" || true
+          } > .gemini-bridge/jobs/facebook-video-19QMZKxnPM.status.txt
+      - name: Upload workspace artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: facebook-video-19QMZKxnPM
+          path: |
+            .gemini-bridge/jobs/facebook-video-19QMZKxnPM.mp4
+            .gemini-bridge/jobs/facebook-video-19QMZKxnPM.status.txt
+            .gemini-bridge/jobs/facebook-video-19QMZKxnPM.info.json
+            .gemini-bridge/jobs/facebook-video-19QMZKxnPM*.srt
+            .gemini-bridge/jobs/facebook-video-19QMZKxnPM*.jpg
+          if-no-files-found: error
+      - name: Commit staged media
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .gemini-bridge/jobs/facebook-video-19QMZKxnPM.mp4 .gemini-bridge/jobs/facebook-video-19QMZKxnPM.status.txt .gemini-bridge/jobs/facebook-video-19QMZKxnPM.info.json || true
+          git add .gemini-bridge/jobs/facebook-video-19QMZKxnPM*.srt .gemini-bridge/jobs/facebook-video-19QMZKxnPM*.jpg 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m 'Stage Facebook video 19QMZKxnPM for Gemini'
+            git push origin HEAD:gemini-fb-19QMZKxnPM
+          fi
+      - name: Publish run id
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --repo Veektall/LightWorship --title "fb-stage-run:19QMZKxnPM:${{ github.run_id }}" --body "run_id=${{ github.run_id }}\nartifact=facebook-video-19QMZKxnPM\nsha=${{ github.sha }}"
