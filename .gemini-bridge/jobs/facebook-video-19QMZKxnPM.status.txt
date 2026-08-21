@@ -1,0 +1,3 @@
+status=ok
+bytes=33582532
+sha256=5b3a5977bd2b7d3997ffd2ad6f43bf7804a6ef9f7357d8e0a6ae0af9ba112d36
