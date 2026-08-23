@@ -3,7 +3,7 @@ from pathlib import Path
 from faster_whisper import WhisperModel
 
 AUDIO=Path(sys.argv[1]); OUT=Path(sys.argv[2]); OUT.mkdir(parents=True, exist_ok=True)
-model=WhisperModel('base.en', device='cpu', compute_type='int8', cpu_threads=4)
+model=WhisperModel('tiny.en', device='cpu', compute_type='int8', cpu_threads=4)
 segments_iter, info=model.transcribe(str(AUDIO), beam_size=1, best_of=1, vad_filter=True, vad_parameters=dict(min_silence_duration_ms=500), condition_on_previous_text=True)
 segments=[]
 for s in segments_iter:
