@@ -1,0 +1,56 @@
+name: ChatGPT Sermon Caption Fast
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  captions:
+    if: startsWith(github.event.pull_request.title, 'chatgpt-sermon-caption-fast')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install yt-dlp
+        run: python3 -m pip install --upgrade pip "yt-dlp[default]"
+      - name: Fetch Facebook automatic captions
+        env:
+          FB_URL: https://www.facebook.com/share/v/1UiBsiXojJ/
+        run: |
+          set -euo pipefail
+          mkdir -p output
+          yt-dlp --no-playlist --dump-single-json --no-warnings "$FB_URL" > output/media-metadata.json
+          yt-dlp --no-playlist --skip-download --write-auto-subs --write-subs --sub-langs "en_US,en.*" --sub-format "srt/best" --convert-subs srt --restrict-filenames --output "output/%(title).100s_%(id)s.%(ext)s" "$FB_URL"
+          python3 - <<'PY'
+          import hashlib, json, re
+          from pathlib import Path
+          meta=json.loads(Path('output/media-metadata.json').read_text(encoding='utf-8'))
+          srts=sorted(Path('output').glob('*.srt'))
+          if not srts: raise SystemExit('No SRT captions found')
+          s=srts[0]; text=s.read_text(encoding='utf-8-sig',errors='replace')
+          blocks=re.split(r'\n\s*\n',text.strip())
+          rows=[]
+          t=re.compile(r'(\d\d:\d\d:\d\d,\d{3}) --> (\d\d:\d\d:\d\d,\d{3})')
+          for block in blocks:
+            lines=[x for x in block.splitlines() if x.strip()]
+            ti=next((i for i,x in enumerate(lines) if '-->' in x),None)
+            if ti is None: continue
+            m=t.search(lines[ti]);
+            if not m: continue
+            rows.append({'start':m.group(1),'end':m.group(2),'text':' '.join(lines[ti+1:]).strip()})
+          Path('output/transcript.json').write_text(json.dumps({'video_id':meta.get('id'),'title':meta.get('title'),'uploader':meta.get('uploader'),'duration':meta.get('duration'),'segments':rows},ensure_ascii=False,indent=2),encoding='utf-8')
+          Path('output/transcript.txt').write_text('\n'.join(f"[{r['start']} - {r['end']}] {r['text']}" for r in rows),encoding='utf-8')
+          Path('output/caption-report.json').write_text(json.dumps({'video_id':meta.get('id'),'duration':meta.get('duration'),'caption_file':s.name,'cue_count':len(rows),'first':rows[0]['start'] if rows else None,'last':rows[-1]['end'] if rows else None,'sha256':hashlib.sha256(s.read_bytes()).hexdigest(),'automatic_languages':sorted((meta.get('automatic_captions') or {}).keys()),'subtitle_languages':sorted((meta.get('subtitles') or {}).keys())},indent=2),encoding='utf-8')
+          PY
+          ls -lh output/
+      - name: Upload captions
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatgpt-sermon-caption-fast-${{ github.run_id }}
+          path: output/
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 6
