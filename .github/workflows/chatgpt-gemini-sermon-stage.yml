@@ -1,0 +1,55 @@
+name: ChatGPT Gemini Sermon Stage
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  stage:
+    if: startsWith(github.event.pull_request.title, 'chatgpt-gemini-sermon-stage')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install media tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python3 -m pip install --upgrade pip fdown-api
+      - name: Build small native-audio review excerpt
+        env:
+          FB_URL: https://www.facebook.com/share/v/1UiBsiXojJ/
+        run: |
+          set -euo pipefail
+          mkdir -p work .gemini-bridge/jobs
+          python3 - <<'PY'
+          import os
+          from fdown_api import Fdown
+          c=Fdown(timeout=60); links=c.get_links(os.environ['FB_URL'])
+          c.download_video(links, quality='normal' if links.sdlink else 'best', filename='source.mp4', dir='work', progress_bar=False, quiet=True)
+          PY
+          ffmpeg -y -v error -ss 01:14:00 -t 240 -i work/source.mp4 -ac 1 -ar 16000 -b:a 16k work/start.mp3
+          ffmpeg -y -v error -ss 02:13:30 -t 180 -i work/source.mp4 -ac 1 -ar 16000 -b:a 16k work/end.mp3
+          ffmpeg -y -v error -i work/start.mp3 -f lavfi -t 2 -i anullsrc=r=16000:cl=mono -i work/end.mp3 -filter_complex '[0:a][1:a][2:a]concat=n=3:v=0:a=1[a]' -map '[a]' -c:a libmp3lame -b:a 16k -ar 16000 -ac 1 .gemini-bridge/jobs/sermon_boundary_review.mp3
+          sha256sum .gemini-bridge/jobs/sermon_boundary_review.mp3
+          ls -lh .gemini-bridge/jobs/sermon_boundary_review.mp3
+      - name: Publish excerpt to isolated staging branch
+        env:
+          STAGE_BRANCH: gemini-sermon-qc-media
+        run: |
+          set -euo pipefail
+          cp .gemini-bridge/jobs/sermon_boundary_review.mp3 /tmp/sermon_boundary_review.mp3
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout --orphan "$STAGE_BRANCH"
+          git rm -rf . >/dev/null 2>&1 || true
+          mkdir -p .gemini-bridge/jobs
+          cp /tmp/sermon_boundary_review.mp3 .gemini-bridge/jobs/
+          git add -f .gemini-bridge/jobs/sermon_boundary_review.mp3
+          git commit -m 'Stage sermon boundary audio for Gemini QC'
+          git push --force origin "$STAGE_BRANCH"
