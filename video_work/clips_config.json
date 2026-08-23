@@ -1,0 +1,39 @@
+{
+  "clips": [
+    {
+      "slug": "listen_to_your_child",
+      "start": 1349.78,
+      "end": 1437.36,
+      "hook_start": 1420.42,
+      "hook_end": 1425.79
+    },
+    {
+      "slug": "problem_contains_solution",
+      "start": 2627.35,
+      "end": 2686.00,
+      "hook_start": 2675.64,
+      "hook_end": 2680.08
+    },
+    {
+      "slug": "word_above_mountains",
+      "start": 4440.20,
+      "end": 4516.17,
+      "hook_start": 4472.11,
+      "hook_end": 4477.64
+    },
+    {
+      "slug": "cross_is_crucifixion",
+      "start": 4603.53,
+      "end": 4692.12,
+      "hook_start": 4612.77,
+      "hook_end": 4618.43
+    },
+    {
+      "slug": "the_threatening_call",
+      "start": 4705.79,
+      "end": 4784.96,
+      "hook_start": 4737.10,
+      "hook_end": 4742.90
+    }
+  ]
+}
