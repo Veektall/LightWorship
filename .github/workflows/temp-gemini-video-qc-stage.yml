@@ -1,0 +1,56 @@
+name: Temporary Gemini Video QC Stage
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'video_work/gemini_qc.trigger'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  stage:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: temp-video-clips-20260823
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: viral-clips-final
+          path: /tmp/final
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: Veektall/LightWorship
+          run-id: 32638569800
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+      - name: Build compact Gemini QC montage
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/mp4s .gemini-bridge/jobs
+          unzip -q /tmp/final/rendered/viral_clips_5_mp4.zip -d /tmp/mp4s
+          ffmpeg -hide_banner -loglevel error -y \
+            -i /tmp/mp4s/01_listen_to_your_child.mp4 \
+            -i /tmp/mp4s/02_problem_contains_solution.mp4 \
+            -i /tmp/mp4s/03_word_above_mountains.mp4 \
+            -i /tmp/mp4s/04_cross_is_crucifixion.mp4 \
+            -i /tmp/mp4s/05_the_threatening_call.mp4 \
+            -filter_complex "[0:v]trim=0:7,setpts=PTS-STARTPTS,scale=180:320[v0];[0:a]atrim=0:7,asetpts=PTS-STARTPTS[a0];[1:v]trim=0:7,setpts=PTS-STARTPTS,scale=180:320[v1];[1:a]atrim=0:7,asetpts=PTS-STARTPTS[a1];[2:v]trim=0:7,setpts=PTS-STARTPTS,scale=180:320[v2];[2:a]atrim=0:7,asetpts=PTS-STARTPTS[a2];[3:v]trim=0:7,setpts=PTS-STARTPTS,scale=180:320[v3];[3:a]atrim=0:7,asetpts=PTS-STARTPTS[a3];[4:v]trim=0:7,setpts=PTS-STARTPTS,scale=180:320[v4];[4:a]atrim=0:7,asetpts=PTS-STARTPTS[a4];[v0][a0][v1][a1][v2][a2][v3][a3][v4][a4]concat=n=5:v=1:a=1[v][a]" \
+            -map '[v]' -map '[a]' -c:v libx264 -preset veryfast -b:v 60k -maxrate 80k -bufsize 160k -c:a aac -b:a 32k -movflags +faststart \
+            .gemini-bridge/jobs/viral-clips-qc-20260823.mp4
+          test "$(stat -c%s .gemini-bridge/jobs/viral-clips-qc-20260823.mp4)" -lt 5000000
+      - name: Commit QC montage to staging branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .gemini-bridge/jobs/viral-clips-qc-20260823.mp4
+          git commit -m 'Stage Gemini QC montage [skip ci]'
+          git push origin HEAD:temp-video-clips-20260823

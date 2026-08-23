@@ -1,0 +1,87 @@
+name: Temporary Viral Clip Render
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'video_work/render.trigger'
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: temp-video-clips-20260823
+
+      - name: Install media tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+
+      - name: Resolve and download Facebook source
+        shell: bash
+        run: |
+          set -euo pipefail
+          API='https://fbdown.vercel.app/api/get?url=https%3A%2F%2Fwww.facebook.com%2Fshare%2Fv%2F1UiBsiXojJ%2F'
+          curl -fL --retry 4 --retry-delay 3 "$API" -o /tmp/fb.json
+          MEDIA_URL="$(jq -r '.sd // .hd // empty' /tmp/fb.json)"
+          test -n "$MEDIA_URL"
+          curl -fL --retry 5 --retry-delay 4 "$MEDIA_URL" -o /tmp/source.mp4
+          ffprobe -v error -show_entries format=duration,size -show_entries stream=index,codec_type,codec_name,width,height -of json /tmp/source.mp4 | tee /tmp/source_probe.json
+
+      - name: Render five edited clips
+        run: |
+          mkdir -p /tmp/rendered
+          python video_work/render_clips.py /tmp/source.mp4 video_work/clips_config.json /tmp/rendered
+
+      - name: Create QC preview frames
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/qc_frames
+          for f in /tmp/rendered/*.mp4; do
+            b="$(basename "$f" .mp4)"
+            ffmpeg -hide_banner -loglevel error -y -ss 1.2 -i "$f" -frames:v 1 "/tmp/qc_frames/${b}_hook.jpg"
+            ffmpeg -hide_banner -loglevel error -y -ss 8.0 -i "$f" -frames:v 1 "/tmp/qc_frames/${b}_main.jpg"
+          done
+
+      - name: Verify ZIP contains exactly five MP4s
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, zipfile
+          from pathlib import Path
+          out=Path('/tmp/rendered')
+          z=out/'viral_clips_5_mp4.zip'
+          assert z.exists(), 'ZIP missing'
+          with zipfile.ZipFile(z) as f:
+              names=f.namelist()
+          assert len(names)==5, names
+          assert all(n.lower().endswith('.mp4') for n in names), names
+          qc=json.loads((out/'qc.json').read_text())
+          assert len(qc)==5, len(qc)
+          for item in qc:
+              streams=item['probe']['streams']
+              vids=[s for s in streams if s.get('codec_type')=='video']
+              auds=[s for s in streams if s.get('codec_type')=='audio']
+              assert vids and vids[0].get('codec_name')=='h264', item
+              assert auds and auds[0].get('codec_name')=='aac', item
+              assert vids[0].get('width')==720 and vids[0].get('height')==1280, item
+          print('QC PASS:', names)
+          PY
+
+      - name: Upload final package
+        uses: actions/upload-artifact@v4
+        with:
+          name: viral-clips-final
+          path: |
+            /tmp/rendered/viral_clips_5_mp4.zip
+            /tmp/rendered/qc.json
+            /tmp/qc_frames/
+          retention-days: 1

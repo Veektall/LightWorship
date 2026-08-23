@@ -1,0 +1,39 @@
+name: Temporary Viral Clips Delivery
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'video_work/delivery.trigger'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: viral-clips-final
+          path: /tmp/final
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: Veektall/LightWorship
+          run-id: 32638569800
+      - name: Extract five MP4s
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/delivery
+          unzip -q /tmp/final/rendered/viral_clips_5_mp4.zip -d /tmp/delivery
+          test "$(find /tmp/delivery -maxdepth 1 -type f -name '*.mp4' | wc -l)" -eq 5
+          test "$(find /tmp/delivery -maxdepth 1 -type f ! -name '*.mp4' | wc -l)" -eq 0
+      - name: Upload clean five-MP4 delivery archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: viral-clips-delivery
+          path: /tmp/delivery/*.mp4
+          compression-level: 4
+          retention-days: 1
