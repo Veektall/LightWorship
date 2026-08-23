@@ -52,5 +52,4 @@ for p in outs:
 zip_path=OUT/'viral_clips_5_mp4.zip'
 with zipfile.ZipFile(zip_path,'w',zipfile.ZIP_DEFLATED,compresslevel=4) as z:
     for p in outs: z.write(p,p.name)
-    z.write(OUT/'qc.json','qc.json')
 print(json.dumps({'zip':str(zip_path),'files':[p.name for p in outs]},indent=2))
