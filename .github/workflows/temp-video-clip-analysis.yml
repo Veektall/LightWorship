@@ -1,0 +1,44 @@
+name: Temporary Video Clip Analysis
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'video_work/analysis.trigger'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: temp-video-clips-20260823
+      - name: Resolve and download source
+        run: |
+          set -euo pipefail
+          API='https://fbdown.vercel.app/api/get?url=https%3A%2F%2Fwww.facebook.com%2Fshare%2Fv%2F1UiBsiXojJ%2F'
+          curl -fL --retry 4 --retry-delay 3 "$API" -o /tmp/fb.json
+          MEDIA_URL="$(jq -r '.sd // .hd // empty' /tmp/fb.json)"
+          test -n "$MEDIA_URL"
+          curl -fL --retry 5 --retry-delay 4 "$MEDIA_URL" -o /tmp/source.mp4
+          ffprobe -v error -show_entries format=duration,size -show_entries stream=index,codec_type,codec_name,width,height -of json /tmp/source.mp4 | tee /tmp/source_probe.json
+      - name: Extract speech audio
+        run: ffmpeg -hide_banner -y -i /tmp/source.mp4 -vn -ac 1 -ar 16000 -c:a pcm_s16le /tmp/audio.wav
+      - name: Install transcription engine
+        run: python -m pip install 'faster-whisper==1.2.0'
+      - name: Transcribe and rank candidates
+        env:
+          HF_HUB_DISABLE_TELEMETRY: '1'
+        run: python video_work/transcribe_candidates.py /tmp/audio.wav /tmp/analysis
+      - name: Upload analysis
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-analysis
+          path: |
+            /tmp/source_probe.json
+            /tmp/analysis/
+          retention-days: 1
