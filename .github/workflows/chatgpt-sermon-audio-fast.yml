@@ -1,0 +1,55 @@
+name: ChatGPT Sermon Audio Fast
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  audio:
+    if: startsWith(github.event.pull_request.title, 'chatgpt-sermon-audio-fast')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python3 -m pip install --upgrade pip fdown-api
+      - name: Fetch and extract untouched sermon source audio
+        env:
+          FB_URL: https://www.facebook.com/share/v/1UiBsiXojJ/
+        run: |
+          set -euo pipefail
+          mkdir -p work output
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          from fdown_api import Fdown
+          url=os.environ['FB_URL']
+          c=Fdown(timeout=60)
+          links=c.get_links(url)
+          Path('output/facebook-info.json').write_text(json.dumps({'url':url,'title':links.title,'description':links.description,'duration':links.duration,'duration_seconds':links.duration_in_seconds,'has_sd':bool(links.sdlink),'has_hd':bool(links.hdlink)},indent=2),encoding='utf-8')
+          c.download_video(links, quality='normal' if links.sdlink else 'best', filename='source.mp4', dir='work', progress_bar=False, quiet=True)
+          PY
+          test -s work/source.mp4
+          ACODEC="$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 work/source.mp4 | head -n1)"
+          if [ "$ACODEC" = "aac" ]; then
+            ffmpeg -y -v error -i work/source.mp4 -vn -map 0:a:0 -c:a copy -movflags +faststart output/source_audio.m4a
+          else
+            ffmpeg -y -v error -i work/source.mp4 -vn -map 0:a:0 -c:a aac -b:a 160k -ar 48000 -movflags +faststart output/source_audio.m4a
+          fi
+          ffprobe -v error -show_format -show_streams -of json output/source_audio.m4a > output/source-audio-ffprobe.json
+          sha256sum output/source_audio.m4a > output/source_audio.sha256
+          ls -lh output/
+      - name: Upload audio
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatgpt-sermon-audio-fast-${{ github.run_id }}
+          path: output/
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
