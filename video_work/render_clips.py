@@ -18,13 +18,17 @@ def render(c, idx):
     dst=OUT/name
     trans=0.42
     xfade_offset=max(0.1,hd-trans)
-    boxx="if(lt(t,0.45),-350+844*t,if(gt(t,2.10),30-950*(t-2.10),30))"
-    textx="if(lt(t,0.45),-300+811*t,if(gt(t,2.10),75-950*(t-2.10),75))"
+    # Slide the red banner in from the left, hold it, then slide it back out.
+    boxx="if(lt(t,0.45),-320+350*t/0.45,if(gt(t,2.10),30-350*(t-2.10)/0.45,30))"
+    textx="if(lt(t,0.45),-275+350*t/0.45,if(gt(t,2.10),75-350*(t-2.10)/0.45,75))"
     fc=f"""
 [0:v]fps=30,split=2[hbg][hfg];
 [hbg]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,gblur=sigma=28,eq=brightness=-0.05:saturation=0.92[hbg2];
 [hfg]scale=760:1280:force_original_aspect_ratio=decrease,unsharp=3:3:0.22:3:3:0[hfg2];
-[hbg2][hfg2]overlay=(W-w)/2:(H-h)/2,drawbox=x='{boxx}':y=118:w=320:h=76:color=red@0.94:t=fill:enable='between(t,0,2.55)',drawtext=fontfile={FONT}:text='COMING UP':fontcolor=white:fontsize=39:x='{textx}':y=136:enable='between(t,0,2.55)',fade=t=in:st=0:d=0.10,format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS[hv];
+[hbg2][hfg2]overlay=(W-w)/2:(H-h)/2,format=yuv420p,settb=AVTB,setpts=PTS-STARTPTS[hcomp];
+color=c=0xD71920@0.96:s=320x76:r=30:d={hd},format=rgba,settb=AVTB,setpts=PTS-STARTPTS[banner];
+[hcomp][banner]overlay=x='{boxx}':y=118:eof_action=pass:format=auto[hban];
+[hban]drawtext=fontfile={FONT}:text='COMING UP':fontcolor=white:fontsize=39:x='{textx}':y=136:enable='between(t,0,2.55)',fade=t=in:st=0:d=0.10,format=yuv420p[hv];
 [1:v]fps=30,split=2[mbg][mfg];
 [mbg]scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280,gblur=sigma=28,eq=brightness=-0.05:saturation=0.92[mbg2];
 [mfg]scale=720:1280:force_original_aspect_ratio=decrease,unsharp=3:3:0.22:3:3:0[mfg2];
@@ -42,7 +46,6 @@ def render(c, idx):
 outs=[]
 for i,c in enumerate(clips,1): outs.append(render(c,i))
 
-# Machine QC: verify all five files have H.264 video, AAC audio, portrait dimensions, and plausible duration.
 qc=[]
 for p in outs:
     probe=subprocess.check_output(['ffprobe','-v','error','-show_entries','format=duration,size:stream=codec_type,codec_name,width,height,sample_rate','-of','json',p],text=True)
