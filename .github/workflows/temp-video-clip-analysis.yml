@@ -6,6 +6,10 @@ on:
     paths:
       - 'video_work/analysis.trigger'
 
+concurrency:
+  group: temp-video-analysis-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
