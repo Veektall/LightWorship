@@ -1,0 +1,124 @@
+name: ChatGPT Sermon Source
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    if: startsWith(github.event.pull_request.title, 'chatgpt-sermon-source')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install media dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --upgrade fdown-api faster-whisper
+
+      - name: Download authorized Facebook replay
+        env:
+          FB_URL: https://www.facebook.com/share/v/1UiBsiXojJ/
+        run: |
+          set -euo pipefail
+          mkdir -p work output
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          from fdown_api import Fdown
+
+          url = os.environ['FB_URL']
+          client = Fdown(timeout=60)
+          links = client.get_links(url)
+          meta = {
+              'requested_url': url,
+              'title': links.title,
+              'description': links.description,
+              'duration': links.duration,
+              'duration_seconds': links.duration_in_seconds,
+              'has_sd': bool(links.sdlink),
+              'has_hd': bool(links.hdlink),
+          }
+          Path('output/facebook-info.json').write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding='utf-8')
+          quality = 'normal' if links.sdlink else 'best'
+          client.download_video(links, quality=quality, filename='source.mp4', dir='work', progress_bar=False, quiet=True)
+          PY
+          test -s work/source.mp4
+          ffprobe -v error -show_format -show_streams -of json work/source.mp4 > output/source-video-ffprobe.json
+
+      - name: Extract untouched audio and analysis audio
+        run: |
+          set -euo pipefail
+          ACODEC="$(ffprobe -v error -select_streams a:0 -show_entries stream=codec_name -of default=nw=1:nk=1 work/source.mp4 | head -n1)"
+          if [ "$ACODEC" = "aac" ]; then
+            ffmpeg -y -v error -i work/source.mp4 -vn -map 0:a:0 -c:a copy -movflags +faststart output/source_audio.m4a
+          else
+            ffmpeg -y -v error -i work/source.mp4 -vn -map 0:a:0 -c:a aac -b:a 160k -ar 48000 -movflags +faststart output/source_audio.m4a
+          fi
+          ffmpeg -y -v error -i output/source_audio.m4a -ac 1 -ar 16000 -c:a aac -b:a 32k -movflags +faststart output/analysis_audio.m4a
+          ffprobe -v error -show_format -show_streams -of json output/source_audio.m4a > output/source-audio-ffprobe.json
+
+      - name: Transcribe full service with timestamps
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from faster_whisper import WhisperModel
+
+          model = WhisperModel('base.en', device='cpu', compute_type='int8')
+          segments, info = model.transcribe(
+              'output/analysis_audio.m4a',
+              beam_size=3,
+              word_timestamps=True,
+              vad_filter=True,
+              vad_parameters=dict(min_silence_duration_ms=500),
+              condition_on_previous_text=True,
+          )
+          rows=[]; srt=[]; txt=[]
+          def ts(sec):
+              ms=round(sec*1000); h,ms=divmod(ms,3600000); m,ms=divmod(ms,60000); s,ms=divmod(ms,1000)
+              return f'{h:02d}:{m:02d}:{s:02d},{ms:03d}'
+          for idx, seg in enumerate(segments,1):
+              text=seg.text.strip()
+              words=[]
+              if seg.words:
+                  words=[{'start':w.start,'end':w.end,'word':w.word,'probability':w.probability} for w in seg.words]
+              rows.append({'id':idx,'start':seg.start,'end':seg.end,'text':text,'words':words,'avg_logprob':seg.avg_logprob,'no_speech_prob':seg.no_speech_prob})
+              if text:
+                  srt += [str(idx), f'{ts(seg.start)} --> {ts(seg.end)}', text, '']
+                  txt.append(f'[{ts(seg.start)} - {ts(seg.end)}] {text}')
+          Path('output/transcript.json').write_text(json.dumps({'language':info.language,'language_probability':info.language_probability,'duration':info.duration,'segments':rows}, ensure_ascii=False, indent=2), encoding='utf-8')
+          Path('output/transcript.srt').write_text('\n'.join(srt), encoding='utf-8')
+          Path('output/transcript.txt').write_text('\n'.join(txt), encoding='utf-8')
+          PY
+
+      - name: Manifest
+        run: |
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          files=[]
+          for p in sorted(Path('output').glob('*')):
+              if p.is_file():
+                  h=hashlib.sha256()
+                  with p.open('rb') as f:
+                      for chunk in iter(lambda:f.read(1024*1024), b''): h.update(chunk)
+                  files.append({'name':p.name,'bytes':p.stat().st_size,'sha256':h.hexdigest()})
+          Path('output/manifest.json').write_text(json.dumps({'files':files},indent=2), encoding='utf-8')
+          PY
+          ls -lh output/
+
+      - name: Upload source package
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatgpt-sermon-source-${{ github.run_id }}
+          path: output/
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
