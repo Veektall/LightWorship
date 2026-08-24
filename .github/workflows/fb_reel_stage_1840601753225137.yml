@@ -69,3 +69,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh issue create --repo Veektall/LightWorship --title "fb-stage-run:1840601753225137:${{ github.run_id }}" --body "run_id=${{ github.run_id }}\nartifact=facebook-reel-1840601753225137\nsha=${{ github.sha }}"
+
+# second commit to trigger the workflow after the workflow file exists on this branch
