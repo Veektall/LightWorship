@@ -1,0 +1,71 @@
+name: Stage Facebook Reel 1840601753225137
+
+on:
+  push:
+    branches:
+      - gemini-fb-1840601753225137
+    paths:
+      - .github/workflows/fb_reel_stage_1840601753225137.yml
+
+permissions:
+  contents: write
+  issues: write
+  actions: read
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gemini-fb-1840601753225137
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install downloader
+        run: python -m pip install --upgrade yt-dlp
+      - name: Download full public reel with audio
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .gemini-bridge/jobs
+          URL='https://www.facebook.com/reel/1840601753225137?sfnsn=scwspwa&mibextid=6AJuK9'
+          OUT='.gemini-bridge/jobs/facebook-reel-1840601753225137.mp4'
+          rm -f "$OUT"
+          yt-dlp --no-playlist --write-info-json --recode-video mp4 --max-filesize 95M -o '.gemini-bridge/jobs/facebook-reel-1840601753225137.%(ext)s' "$URL"
+          FOUND=$(find .gemini-bridge/jobs -maxdepth 1 -type f -name 'facebook-reel-1840601753225137.*' ! -name '*.status.txt' ! -name '*.info.json' | head -n 1)
+          if [ "$FOUND" != "$OUT" ]; then mv "$FOUND" "$OUT"; fi
+          test -s "$OUT"
+          ffmpeg -y -i "$OUT" -vn -ac 1 -ar 16000 .gemini-bridge/jobs/facebook-reel-1840601753225137.wav >/dev/null 2>&1
+          {
+            echo 'status=ok'
+            echo "bytes=$(stat -c%s "$OUT")"
+            echo "sha256=$(sha256sum "$OUT" | awk '{print $1}')"
+            ffprobe -v error -show_entries format=duration,size -of default=nw=1 "$OUT" || true
+          } > .gemini-bridge/jobs/facebook-reel-1840601753225137.status.txt
+      - name: Upload workspace artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: facebook-reel-1840601753225137
+          path: |
+            .gemini-bridge/jobs/facebook-reel-1840601753225137.mp4
+            .gemini-bridge/jobs/facebook-reel-1840601753225137.wav
+            .gemini-bridge/jobs/facebook-reel-1840601753225137.status.txt
+            .gemini-bridge/jobs/facebook-reel-1840601753225137.info.json
+          if-no-files-found: error
+      - name: Commit staged media
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .gemini-bridge/jobs/facebook-reel-1840601753225137.mp4 .gemini-bridge/jobs/facebook-reel-1840601753225137.status.txt .gemini-bridge/jobs/facebook-reel-1840601753225137.info.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'Stage Facebook reel 1840601753225137 for Gemini'
+            git push origin HEAD:gemini-fb-1840601753225137
+          fi
+      - name: Publish run id
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --repo Veektall/LightWorship --title "fb-stage-run:1840601753225137:${{ github.run_id }}" --body "run_id=${{ github.run_id }}\nartifact=facebook-reel-1840601753225137\nsha=${{ github.sha }}"
