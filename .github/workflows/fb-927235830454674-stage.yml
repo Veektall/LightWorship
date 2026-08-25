@@ -16,12 +16,12 @@ jobs:
           set -euxo pipefail
           mkdir -p out
           URL='https://www.facebook.com/reel/927235830454674?sfnsn=scwspwa&mibextid=6AJuK9'
-          yt-dlp --no-playlist --write-info-json --merge-output-format mp4 -o 'out/facebook-reel-927235830454674.%(ext)s' "$URL"
+          yt-dlp --no-playlist --write-info-json -o 'out/facebook-reel-927235830454674.%(ext)s' "$URL"
           test -f out/facebook-reel-927235830454674.mp4
-          ffprobe -v error -show_entries format=duration,size -show_streams -of json out/facebook-reel-927235830454674.mp4 > out/ffprobe.json
           sha256sum out/facebook-reel-927235830454674.mp4 > out/sha256.txt
           echo ok > out/status.txt
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: facebook-reel-927235830454674
           path: out/
