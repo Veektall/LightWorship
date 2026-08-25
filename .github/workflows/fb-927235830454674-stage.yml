@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install yt-dlp
-        run: python -m pip install -U yt-dlp
-      - name: Download and stage reel
+      - name: Install tools
+        run: python -m pip install -U yt-dlp faster-whisper
+      - name: Download reel
         shell: bash
         run: |
           set -euxo pipefail
@@ -24,14 +24,39 @@ jobs:
           cp out/facebook-reel-927235830454674.mp4 .gemini-bridge/jobs/facebook-reel-927235830454674.mp4
           sha256sum out/facebook-reel-927235830454674.mp4 > out/sha256.txt
           echo ok > out/status.txt
+      - name: Transcribe entire reel
+        shell: bash
+        run: |
+          python - <<'PY'
+          from faster_whisper import WhisperModel
+          video='out/facebook-reel-927235830454674.mp4'
+          model=WhisperModel('base.en', device='cpu', compute_type='int8')
+          segs, info=model.transcribe(video, beam_size=5, vad_filter=True)
+          segs=list(segs)
+          with open('out/transcript.txt','w',encoding='utf-8') as f:
+              for s in segs: f.write(s.text.strip()+'\n')
+          def ts(x):
+              h=int(x//3600); x-=h*3600; m=int(x//60); x-=m*60; sec=int(x); ms=int(round((x-sec)*1000))
+              if ms==1000: sec+=1; ms=0
+              return f'{h:02d}:{m:02d}:{sec:02d},{ms:03d}'
+          with open('out/transcript.srt','w',encoding='utf-8') as f:
+              for i,s in enumerate(segs,1):
+                  f.write(f'{i}\n{ts(s.start)} --> {ts(s.end)}\n{s.text.strip()}\n\n')
+          print('language',info.language,'prob',info.language_probability,'segments',len(segs))
+          PY
+      - name: Keep media staged for Gemini
+        shell: bash
+        run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add .gemini-bridge/jobs/facebook-reel-927235830454674.mp4
-          git commit -m 'Stage Facebook reel 927235830454674 for Gemini [skip ci]'
-          git push origin HEAD:fb-927235830454674-stage
+          if ! git diff --cached --quiet; then
+            git commit -m 'Stage Facebook reel 927235830454674 for Gemini [skip ci]'
+            git push origin HEAD:fb-927235830454674-stage
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: facebook-reel-927235830454674
+          name: facebook-reel-927235830454674-transcribed
           path: out/
           retention-days: 1
