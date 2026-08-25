@@ -32,16 +32,14 @@ jobs:
           URL='https://www.facebook.com/reel/1077347771613342/'
           OUT='.gemini-bridge/jobs/facebook-reel-1077347771613342.mp4'
           rm -f "$OUT"
-          yt-dlp --no-playlist --write-info-json --write-subs --write-auto-subs --sub-langs 'en.*,en_US,en' --convert-subs srt --recode-video mp4 --max-filesize 95M -o '.gemini-bridge/jobs/facebook-reel-1077347771613342.%(ext)s' "$URL"
-          FOUND=$(find .gemini-bridge/jobs -maxdepth 1 -type f -name 'facebook-reel-1077347771613342.*' ! -name '*.status.txt' ! -name '*.info.json' ! -name '*.srt' | head -n 1)
+          yt-dlp --no-playlist --write-info-json --recode-video mp4 --max-filesize 95M -o '.gemini-bridge/jobs/facebook-reel-1077347771613342.%(ext)s' "$URL"
+          FOUND=$(find .gemini-bridge/jobs -maxdepth 1 -type f -name 'facebook-reel-1077347771613342.*' ! -name '*.status.txt' ! -name '*.info.json' | head -n 1)
           if [ "$FOUND" != "$OUT" ]; then mv "$FOUND" "$OUT"; fi
           test -s "$OUT"
-          ffmpeg -y -i "$OUT" -vn -ac 1 -ar 16000 .gemini-bridge/jobs/facebook-reel-1077347771613342.wav >/dev/null 2>&1
           {
             echo 'status=ok'
             echo "bytes=$(stat -c%s "$OUT")"
             echo "sha256=$(sha256sum "$OUT" | awk '{print $1}')"
-            ffprobe -v error -show_entries format=duration,size -of default=nw=1 "$OUT" || true
           } > .gemini-bridge/jobs/facebook-reel-1077347771613342.status.txt
       - name: Upload workspace artifact
         uses: actions/upload-artifact@v4
@@ -49,10 +47,8 @@ jobs:
           name: facebook-reel-1077347771613342
           path: |
             .gemini-bridge/jobs/facebook-reel-1077347771613342.mp4
-            .gemini-bridge/jobs/facebook-reel-1077347771613342.wav
             .gemini-bridge/jobs/facebook-reel-1077347771613342.status.txt
             .gemini-bridge/jobs/facebook-reel-1077347771613342.info.json
-            .gemini-bridge/jobs/facebook-reel-1077347771613342*.srt
           if-no-files-found: error
       - name: Commit staged media
         shell: bash
