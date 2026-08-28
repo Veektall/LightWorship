@@ -1,199 +1,97 @@
 name: ChatGPT PR Starlink Montage
-
 on:
   pull_request:
     types: [opened, reopened, synchronize]
-
 permissions:
   contents: read
-
 jobs:
   build-montage:
     if: startsWith(github.event.pull_request.title, 'chatgpt-starlink-montage')
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install media and transcription tools
+      - name: Install tools
         run: |
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
-          python3 -m pip install --upgrade pip
-          python3 -m pip install --upgrade 'yt-dlp[default,curl-cffi]' faster-whisper
-
-      - name: Download public X-hosted source videos
+          python3 -m pip install -q --upgrade pip 'yt-dlp[default,curl-cffi]' faster-whisper
+      - name: Pull X video sources fast
         run: |
           set -euo pipefail
           mkdir -p work output
-
-          # Older footage: SATELLITE 2020 excerpt reposted publicly on X.
-          # Original event date is March 9, 2020; X repost date is July 6, 2025.
-          yt-dlp --no-playlist --impersonate chrome \
-            -f 'bestvideo[height<=720]+bestaudio/best[height<=720]/best' \
-            --merge-output-format mp4 -o 'work/old.%(ext)s' \
-            'https://x.com/MarioNawfal/status/1941774116249313693'
-
-          # Newer footage: official SpaceX All-Hands Company Update posted Aug. 11, 2026.
-          yt-dlp --no-playlist --impersonate chrome \
-            -f 'bestvideo[height<=720]+bestaudio/best[height<=720]/best' \
-            --merge-output-format mp4 -o 'work/new.%(ext)s' \
-            'https://x.com/SpaceX/status/2087283977866379361'
-
-          OLD="$(find work -maxdepth 1 -type f -name 'old.*' | head -n1)"
-          NEW="$(find work -maxdepth 1 -type f -name 'new.*' | head -n1)"
+          yt-dlp --no-playlist --impersonate chrome -f 'best[height<=360]/worst' -o 'work/old.%(ext)s' 'https://x.com/MarioNawfal/status/1941774116249313693'
+          yt-dlp --no-playlist --impersonate chrome -f 'best[height<=360]/worst' -o 'work/new.%(ext)s' 'https://x.com/SpaceX/status/2087283977866379361'
+          OLD="$(find work -maxdepth 1 -type f -name 'old.*' | head -n1)"; NEW="$(find work -maxdepth 1 -type f -name 'new.*' | head -n1)"
           test -n "$OLD" && test -n "$NEW"
-
-          ffmpeg -y -v error -i "$OLD" -c:v libx264 -preset veryfast -crf 19 -c:a aac -b:a 160k -movflags +faststart work/old-source.mp4
-          ffmpeg -y -v error -i "$NEW" -c:v libx264 -preset veryfast -crf 19 -c:a aac -b:a 160k -movflags +faststart work/new-source.mp4
+          ffmpeg -y -v error -i "$OLD" -map 0:v:0 -map 0:a:0? -c copy work/old-source.mp4
+          ffmpeg -y -v error -i "$NEW" -map 0:v:0 -map 0:a:0? -c copy work/new-source.mp4
           ffprobe -v error -show_format -show_streams -of json work/old-source.mp4 > output/old-source-ffprobe.json
           ffprobe -v error -show_format -show_streams -of json work/new-source.mp4 > output/new-source-ffprobe.json
-
-      - name: Transcribe and locate the claims
+      - name: Locate spoken claims
         run: |
           set -euo pipefail
           ffmpeg -y -v error -i work/old-source.mp4 -vn -ac 1 -ar 16000 work/old.wav
           ffmpeg -y -v error -i work/new-source.mp4 -vn -ac 1 -ar 16000 work/new.wav
-
           python3 - <<'PY'
-          import json, re
+          import json,re
           from pathlib import Path
           from faster_whisper import WhisperModel
-
-          model = WhisperModel('tiny.en', device='cpu', compute_type='int8')
-
-          def transcribe(path, out):
-              segments, info = model.transcribe(path, beam_size=5, vad_filter=True, word_timestamps=False)
-              rows=[]
-              for s in segments:
-                  rows.append({'start':float(s.start),'end':float(s.end),'text':s.text.strip()})
-              Path(out).write_text(json.dumps({'language':info.language,'segments':rows}, indent=2, ensure_ascii=False), encoding='utf-8')
-              return rows
-
-          old = transcribe('work/old.wav', 'output/old-transcript.json')
-          new = transcribe('work/new.wav', 'output/new-transcript.json')
-
-          def window_text(rows, i, radius=3):
-              lo=max(0,i-radius); hi=min(len(rows),i+radius+1)
-              return ' '.join(r['text'] for r in rows[lo:hi]).lower(), lo, hi
-
-          def best_old(rows):
-              best=(-1,0,0,0,'')
+          m=WhisperModel('tiny.en',device='cpu',compute_type='int8')
+          def tr(p,o):
+              segs,info=m.transcribe(p,beam_size=3,vad_filter=True)
+              r=[{'start':float(s.start),'end':float(s.end),'text':s.text.strip()} for s in segs]
+              Path(o).write_text(json.dumps({'language':info.language,'segments':r},indent=2),encoding='utf-8'); return r
+          old=tr('work/old.wav','output/old-transcript.json'); new=tr('work/new.wav','output/new-transcript.json')
+          def locate(rows,kind):
+              best=(-1,0,'')
               for i in range(len(rows)):
-                  text,lo,hi=window_text(rows,i,3)
-                  score=0
-                  if 'threat' in text and ('telco' in text or 'telecom' in text): score += 18
-                  if 'hardest' in text and ('reach' in text or 'serve' in text): score += 14
-                  if ('three' in text or '3' in text) and ('four' in text or '4' in text) and 'percent' in text: score += 10
-                  if 'high density' in text: score += 5
-                  if score > best[0]:
-                      best=(score,i,lo,hi,text)
-              score,i,lo,hi,text=best
-              if score < 10:
-                  raise SystemExit('Could not confidently locate older Starlink quote')
-              start=max(0, rows[max(0,i-2)]['start']-4)
-              # Keep enough context to include the threat + hardest-to-reach explanation.
-              end=min(rows[-1]['end'], start+68)
-              return start,end,score,text
-
-          def best_new(rows):
-              best=(-1,0,0,0,'')
-              for i in range(len(rows)):
-                  text,lo,hi=window_text(rows,i,4)
-                  score=0
-                  if 'ninety' in text or re.search(r'\b90\b', text): score += 30
-                  if 'internet traffic' in text: score += 16
-                  if 'majority' in text and 'internet' in text: score += 10
-                  if 'starlink' in text: score += 4
-                  if score > best[0]:
-                      best=(score,i,lo,hi,text)
-              score,i,lo,hi,text=best
-              if score < 20:
-                  raise SystemExit('Could not confidently locate newer >90% Starlink quote')
-              start=max(0, rows[max(0,i-2)]['start']-5)
-              end=min(rows[-1]['end'], start+42)
-              return start,end,score,text
-
-          os_,oe,oscore,otext = best_old(old)
-          ns,ne,nscore,ntext = best_new(new)
-          cuts={
-              'old':{'start':os_,'end':oe,'duration':oe-os_,'score':oscore,'context':otext},
-              'new':{'start':ns,'end':ne,'duration':ne-ns,'score':nscore,'context':ntext},
-          }
-          Path('output/cuts.json').write_text(json.dumps(cuts,indent=2,ensure_ascii=False),encoding='utf-8')
-          Path('work/cuts.env').write_text(
-              f"OLD_START={os_:.3f}\nOLD_DUR={oe-os_:.3f}\nNEW_START={ns:.3f}\nNEW_DUR={ne-ns:.3f}\n",
-              encoding='utf-8')
+                  t=' '.join(x['text'] for x in rows[max(0,i-4):min(len(rows),i+5)]).lower(); s=0
+                  if kind=='old':
+                      if 'threat' in t and ('telco' in t or 'telecom' in t): s+=30
+                      if 'hardest' in t and ('reach' in t or 'serve' in t): s+=20
+                      if 'percent' in t and ('three' in t or '3' in t): s+=10
+                  else:
+                      if 'ninety' in t or re.search(r'\b90\b',t): s+=40
+                      if 'internet traffic' in t: s+=25
+                      if 'majority' in t and 'internet' in t: s+=12
+                  if s>best[0]: best=(s,i,t)
+              s,i,t=best
+              threshold=15 if kind=='old' else 25
+              if s<threshold: raise SystemExit(f'Could not locate {kind} claim; best={best}')
+              st=max(0,rows[max(0,i-2)]['start']-5)
+              dur=65 if kind=='old' else 42
+              en=min(rows[-1]['end'],st+dur)
+              return {'start':st,'duration':en-st,'score':s,'context':t}
+          cuts={'old':locate(old,'old'),'new':locate(new,'new')}
+          Path('output/cuts.json').write_text(json.dumps(cuts,indent=2),encoding='utf-8')
+          Path('work/cuts.env').write_text(f"OLD_START={cuts['old']['start']:.3f}\nOLD_DUR={cuts['old']['duration']:.3f}\nNEW_START={cuts['new']['start']:.3f}\nNEW_DUR={cuts['new']['duration']:.3f}\n")
           print(json.dumps(cuts,indent=2))
           PY
-
-      - name: Render source-dated excerpts
+      - name: Render dated montage
         run: |
           set -euo pipefail
           source work/cuts.env
-          FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
-          REG=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
-
-          ffmpeg -y -v error -ss "$OLD_START" -t "$OLD_DUR" -i work/old-source.mp4 \
-            -vf "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,drawbox=x=0:y=0:w=1280:h=102:color=black@0.80:t=fill,drawtext=fontfile=${FONT}:text='MAR 9 2020 | SATELLITE 2020':x=34:y=16:fontsize=34:fontcolor=white,drawtext=fontfile=${REG}:text='Original event | X-hosted repost source: @MarioNawfal':x=34:y=61:fontsize=21:fontcolor=white" \
-            -af "loudnorm=I=-16:TP=-1.5:LRA=11" -r 30 -c:v libx264 -preset medium -crf 19 -pix_fmt yuv420p -c:a aac -b:a 160k -movflags +faststart output/01-then-2020.mp4
-
-          ffmpeg -y -v error -ss "$NEW_START" -t "$NEW_DUR" -i work/new-source.mp4 \
-            -vf "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,drawbox=x=0:y=0:w=1280:h=102:color=black@0.80:t=fill,drawtext=fontfile=${FONT}:text='AUG 11 2026 | SPACEX ALL-HANDS':x=34:y=16:fontsize=34:fontcolor=white,drawtext=fontfile=${REG}:text='Official @SpaceX video | Musk: majority / over 90% of Internet traffic':x=34:y=61:fontsize=21:fontcolor=white" \
-            -af "loudnorm=I=-16:TP=-1.5:LRA=11" -r 30 -c:v libx264 -preset medium -crf 19 -pix_fmt yuv420p -c:a aac -b:a 160k -movflags +faststart output/02-now-2026.mp4
-
-      - name: Build final montage
-        run: |
-          set -euo pipefail
-          FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
-          REG=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
-
-          ffmpeg -y -v error -f lavfi -i "color=c=0x0b0b0d:s=1280x720:r=30:d=2.5" -f lavfi -i "anullsrc=r=48000:cl=stereo:d=2.5" \
-            -vf "drawtext=fontfile=${FONT}:text='STARLINK: THEN -> NOW':x=(w-text_w)/2:y=278:fontsize=58:fontcolor=white,drawtext=fontfile=${REG}:text='Elon Musk | 2020 vs 2026 | source-dated excerpts':x=(w-text_w)/2:y=363:fontsize=27:fontcolor=white" \
-            -shortest -c:v libx264 -preset medium -crf 19 -pix_fmt yuv420p -c:a aac -b:a 160k output/00-title.mp4
-
-          ffmpeg -y -v error -f lavfi -i "color=c=0x0b0b0d:s=1280x720:r=30:d=1.4" -f lavfi -i "anullsrc=r=48000:cl=stereo:d=1.4" \
-            -vf "drawtext=fontfile=${FONT}:text='SIX YEARS LATER':x=(w-text_w)/2:y=320:fontsize=54:fontcolor=white" \
-            -shortest -c:v libx264 -preset medium -crf 19 -pix_fmt yuv420p -c:a aac -b:a 160k output/transition.mp4
-
-          printf "file '%s'\n" \
-            "$PWD/output/00-title.mp4" \
-            "$PWD/output/01-then-2020.mp4" \
-            "$PWD/output/transition.mp4" \
-            "$PWD/output/02-now-2026.mp4" > output/concat.txt
-
-          ffmpeg -y -v error -f concat -safe 0 -i output/concat.txt \
-            -c:v libx264 -preset medium -crf 19 -pix_fmt yuv420p -c:a aac -b:a 160k -movflags +faststart \
-            output/starlink-then-now.mp4
-
+          F=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
+          R=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+          common="scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,drawbox=x=0:y=0:w=1280:h=102:color=black@0.82:t=fill"
+          ffmpeg -y -v error -ss "$OLD_START" -t "$OLD_DUR" -i work/old-source.mp4 -vf "$common,drawtext=fontfile=$F:text='MAR 9 2020 | SATELLITE 2020':x=34:y=15:fontsize=34:fontcolor=white,drawtext=fontfile=$R:text='Original event | X-hosted repost: @MarioNawfal':x=34:y=61:fontsize=21:fontcolor=white" -af 'loudnorm=I=-16:TP=-1.5:LRA=11' -r 30 -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -b:a 160k output/01-then.mp4
+          ffmpeg -y -v error -ss "$NEW_START" -t "$NEW_DUR" -i work/new-source.mp4 -vf "$common,drawtext=fontfile=$F:text='AUG 11 2026 | SPACEX ALL-HANDS':x=34:y=15:fontsize=34:fontcolor=white,drawtext=fontfile=$R:text='Official @SpaceX video | majority / over 90% claim':x=34:y=61:fontsize=21:fontcolor=white" -af 'loudnorm=I=-16:TP=-1.5:LRA=11' -r 30 -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -b:a 160k output/02-now.mp4
+          ffmpeg -y -v error -f lavfi -i 'color=c=0x0b0b0d:s=1280x720:r=30:d=2' -f lavfi -i 'anullsrc=r=48000:cl=stereo:d=2' -vf "drawtext=fontfile=$F:text='STARLINK: THEN -> NOW':x=(w-text_w)/2:y=292:fontsize=58:fontcolor=white,drawtext=fontfile=$R:text='Elon Musk | 2020 vs 2026':x=(w-text_w)/2:y=375:fontsize=28:fontcolor=white" -shortest -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -b:a 160k output/00-title.mp4
+          ffmpeg -y -v error -f lavfi -i 'color=c=0x0b0b0d:s=1280x720:r=30:d=1.2' -f lavfi -i 'anullsrc=r=48000:cl=stereo:d=1.2' -vf "drawtext=fontfile=$F:text='SIX YEARS LATER':x=(w-text_w)/2:y=320:fontsize=52:fontcolor=white" -shortest -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -b:a 160k output/transition.mp4
+          printf "file '%s'\n" "$PWD/output/00-title.mp4" "$PWD/output/01-then.mp4" "$PWD/output/transition.mp4" "$PWD/output/02-now.mp4" > output/concat.txt
+          ffmpeg -y -v error -f concat -safe 0 -i output/concat.txt -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -b:a 160k -movflags +faststart output/starlink-then-now.mp4
           cat > output/SOURCES.txt <<'EOF'
           STARLINK: THEN -> NOW
-
-          THEN — SATELLITE 2020
-          Original event date: March 9, 2020
-          Original event: SATELLITE 2020, Washington, D.C.
-          X-hosted repost used for media acquisition: https://x.com/MarioNawfal/status/1941774116249313693
-          Repost date: July 6, 2025
-          Content includes Musk saying Starlink is not a huge threat to telcos, is helpful to telcos, and is aimed at the hardest-to-reach few percent.
-
-          NOW — SPACEX ALL-HANDS COMPANY UPDATE
-          Official @SpaceX post date: August 11, 2026
-          Official video: https://x.com/SpaceX/status/2087283977866379361
-          Content includes Musk saying Starlink will probably do the majority of the Internet and may end up doing over 90% of all Internet traffic on Starlink.
-
-          Editorial method:
-          - Spoken phrases were located by automatic transcription, then source video was cut around those segments with surrounding context.
-          - Dates and source labels are burned into the video.
-          - No synthetic Musk voice, voice cloning, or invented dialogue is used.
-          - The older clip's on-screen date is the date of the original SATELLITE 2020 event, not the later X repost date.
+          THEN: SATELLITE 2020, March 9, 2020. X-hosted repost used for acquisition: https://x.com/MarioNawfal/status/1941774116249313693 (repost July 6, 2025).
+          NOW: Official @SpaceX All-Hands video posted August 11, 2026: https://x.com/SpaceX/status/2087283977866379361.
+          The older clip contains Musk saying Starlink is not a huge threat to telcos and targets the hardest-to-reach few percent. The newer clip contains Musk saying Starlink will probably do the majority of the Internet and may end up doing over 90% of all Internet traffic.
+          Spoken phrases were located by automatic transcription. No synthetic voice or invented dialogue is used. Date stamps are burned into the footage.
           EOF
-
           ffprobe -v error -show_format -show_streams -of json output/starlink-then-now.mp4 > output/final-ffprobe.json
           sha256sum output/starlink-then-now.mp4 > output/SHA256SUMS.txt
-          ls -lh output/starlink-then-now.mp4
-
-      - name: Upload montage artifact
+      - name: Upload montage
         uses: actions/upload-artifact@v4
         with:
           name: chatgpt-starlink-montage-${{ github.run_id }}
