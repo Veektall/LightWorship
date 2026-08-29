@@ -1,0 +1,67 @@
+name: Pixel Subway Acquire Temp
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/pixel-subway-acquire-temp.yml'
+
+jobs:
+  acquire:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Playwright
+        run: |
+          mkdir -p /tmp/pss-acquire
+          cd /tmp/pss-acquire
+          npm init -y
+          npm install playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Download authentic itch.io files
+        run: |
+          cat > /tmp/pss-acquire/download.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          import fs from 'fs';
+          import path from 'path';
+          const out='/tmp/pss-files'; fs.mkdirSync(out,{recursive:true});
+          const browser=await chromium.launch({headless:true});
+          const context=await browser.newContext({acceptDownloads:true,viewport:{width:1280,height:900}});
+          const page=await context.newPage();
+          await page.goto('https://lumis-dev.itch.io/pixel-subway-surfers/purchase',{waitUntil:'domcontentloaded',timeout:120000});
+          await page.screenshot({path:path.join(out,'01-purchase.png'),fullPage:true});
+          console.log('PURCHASE',page.url());
+          console.log((await page.locator('body').innerText()).slice(0,10000));
+          const free=page.getByText('No thanks, just take me to the downloads',{exact:false}).first();
+          await free.waitFor({state:'visible',timeout:60000});
+          await free.click();
+          await page.waitForTimeout(3000);
+          await page.screenshot({path:path.join(out,'02-downloads.png'),fullPage:true});
+          console.log('DOWNLOADS',page.url());
+          console.log((await page.locator('body').innerText()).slice(0,12000));
+          async function grab(label,filename){
+            const el=page.getByText(label,{exact:false}).first();
+            await el.waitFor({state:'visible',timeout:60000});
+            const [d]=await Promise.all([page.waitForEvent('download',{timeout:120000}),el.click()]);
+            const dest=path.join(out,filename); await d.saveAs(dest); console.log('SAVED',dest,fs.statSync(dest).size);
+          }
+          await grab('PSSSourcecode.zip','PSSSourcecode.zip');
+          await grab('PSSLinux.zip','PSSLinux.zip');
+          await browser.close();
+          EOF
+          cd /tmp/pss-acquire
+          node download.mjs
+      - name: Inventory
+        if: always()
+        run: ls -lah /tmp/pss-files || true
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pixel-subway-authentic
+          path: /tmp/pss-files
+          if-no-files-found: error
+          retention-days: 1
