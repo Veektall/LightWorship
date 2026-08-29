@@ -1,0 +1,55 @@
+name: Pixel Subway Debug Temp
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/pixel-subway-debug-temp.yml'
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Playwright
+        run: |
+          mkdir -p /tmp/pss-debug && cd /tmp/pss-debug
+          npm init -y
+          npm install playwright@1.55.0
+          npx playwright install chromium
+      - name: Inspect itch download flow
+        run: |
+          cat > /tmp/pss-debug/debug.mjs <<'EOF'
+          import { chromium } from 'playwright';
+          import fs from 'fs';
+          const out='/tmp/pss-debug-out'; fs.mkdirSync(out,{recursive:true});
+          const browser=await chromium.launch({headless:true,args:['--no-sandbox']});
+          const page=await browser.newPage({viewport:{width:1280,height:900},acceptDownloads:true});
+          await page.goto('https://lumis-dev.itch.io/pixel-subway-surfers/purchase',{waitUntil:'domcontentloaded',timeout:45000});
+          await page.screenshot({path:out+'/purchase.png',fullPage:true});
+          fs.writeFileSync(out+'/purchase.html',await page.content());
+          fs.writeFileSync(out+'/purchase.txt',await page.locator('body').innerText());
+          const free=page.getByText('No thanks, just take me to the downloads',{exact:false}).first();
+          console.log('FREE COUNT',await free.count());
+          await free.click({timeout:15000});
+          await page.waitForTimeout(2500);
+          console.log('POST URL',page.url());
+          await page.screenshot({path:out+'/downloads.png',fullPage:true});
+          fs.writeFileSync(out+'/downloads.html',await page.content());
+          fs.writeFileSync(out+'/downloads.txt',await page.locator('body').innerText());
+          const links=await page.locator('a').evaluateAll(as=>as.map(a=>({text:(a.innerText||'').trim(),href:a.href,download:a.getAttribute('download'),class:a.className})).filter(x=>x.text||x.href));
+          fs.writeFileSync(out+'/links.json',JSON.stringify(links,null,2));
+          console.log('LINKS',JSON.stringify(links,null,2).slice(0,20000));
+          await browser.close();
+          EOF
+          node /tmp/pss-debug/debug.mjs
+      - name: Upload debug artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pixel-subway-debug
+          path: /tmp/pss-debug-out
+          retention-days: 1
