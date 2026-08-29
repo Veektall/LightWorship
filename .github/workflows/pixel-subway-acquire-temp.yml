@@ -9,7 +9,7 @@ on:
 jobs:
   acquire:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/setup-node@v4
         with:
@@ -20,7 +20,7 @@ jobs:
           cd /tmp/pss-acquire
           npm init -y
           npm install playwright@1.55.0
-          npx playwright install --with-deps chromium
+          npx playwright install chromium
       - name: Download authentic itch.io files
         run: |
           cat > /tmp/pss-acquire/download.mjs <<'EOF'
@@ -28,28 +28,31 @@ jobs:
           import fs from 'fs';
           import path from 'path';
           const out='/tmp/pss-files'; fs.mkdirSync(out,{recursive:true});
-          const browser=await chromium.launch({headless:true});
+          const browser=await chromium.launch({headless:true,args:['--no-sandbox']});
           const context=await browser.newContext({acceptDownloads:true,viewport:{width:1280,height:900}});
           const page=await context.newPage();
-          await page.goto('https://lumis-dev.itch.io/pixel-subway-surfers/purchase',{waitUntil:'domcontentloaded',timeout:120000});
-          await page.screenshot({path:path.join(out,'01-purchase.png'),fullPage:true});
-          console.log('PURCHASE',page.url());
-          console.log((await page.locator('body').innerText()).slice(0,10000));
+          await page.goto('https://lumis-dev.itch.io/pixel-subway-surfers/purchase',{waitUntil:'domcontentloaded',timeout:60000});
           const free=page.getByText('No thanks, just take me to the downloads',{exact:false}).first();
-          await free.waitFor({state:'visible',timeout:60000});
+          await free.waitFor({state:'visible',timeout:30000});
           await free.click();
-          await page.waitForTimeout(3000);
-          await page.screenshot({path:path.join(out,'02-downloads.png'),fullPage:true});
+          await page.waitForTimeout(2000);
+          await page.screenshot({path:path.join(out,'downloads.png'),fullPage:true});
           console.log('DOWNLOADS',page.url());
-          console.log((await page.locator('body').innerText()).slice(0,12000));
-          async function grab(label,filename){
-            const el=page.getByText(label,{exact:false}).first();
-            await el.waitFor({state:'visible',timeout:60000});
-            const [d]=await Promise.all([page.waitForEvent('download',{timeout:120000}),el.click()]);
-            const dest=path.join(out,filename); await d.saveAs(dest); console.log('SAVED',dest,fs.statSync(dest).size);
+
+          async function grab(uploadId,filename){
+            const btn=page.locator(`a.download_btn[data-upload_id="${uploadId}"]`);
+            await btn.waitFor({state:'visible',timeout:30000});
+            console.log('CLICK',filename,uploadId);
+            const downloadPromise=page.waitForEvent('download',{timeout:60000});
+            await btn.click();
+            const d=await downloadPromise;
+            const dest=path.join(out,filename);
+            await d.saveAs(dest);
+            console.log('SAVED',dest,fs.statSync(dest).size,await d.suggestedFilename());
           }
-          await grab('PSSSourcecode.zip','PSSSourcecode.zip');
-          await grab('PSSLinux.zip','PSSLinux.zip');
+
+          await grab('11488281','PSSSourcecode.zip');
+          await grab('11488283','PSSLinux.zip');
           await browser.close();
           EOF
           cd /tmp/pss-acquire
@@ -61,7 +64,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pixel-subway-authentic
+          name: pixel-subway-authentic-fixed
           path: /tmp/pss-files
           if-no-files-found: error
           retention-days: 1
