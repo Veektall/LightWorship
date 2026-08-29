@@ -1,0 +1,48 @@
+name: ChatGPT Gemini Stage Starlink Review
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+permissions:
+  contents: write
+jobs:
+  stage-video:
+    if: startsWith(github.event.pull_request.title, 'gemini-stage-starlink-review') && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Install tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
+          python3 -m pip install -q --upgrade pip 'yt-dlp[default,curl-cffi]'
+      - name: Rebuild exact review montage
+        run: |
+          set -euo pipefail
+          mkdir -p work output .gemini-bridge/jobs
+          yt-dlp --no-playlist --impersonate chrome -f 'best[height<=360]/worst' -o 'work/old.%(ext)s' 'https://x.com/MarioNawfal/status/1941774116249313693'
+          yt-dlp --no-playlist --impersonate chrome -f 'best[height<=360]/worst' -o 'work/new.%(ext)s' 'https://x.com/SpaceX/status/2087283977866379361'
+          OLD="$(find work -maxdepth 1 -type f -name 'old.*' | head -n1)"
+          NEW="$(find work -maxdepth 1 -type f -name 'new.*' | head -n1)"
+          ffmpeg -y -v error -i "$OLD" -map 0:v:0 -map 0:a:0? -c copy work/old-source.mp4
+          ffmpeg -y -v error -i "$NEW" -map 0:v:0 -map 0:a:0? -c copy work/new-source.mp4
+          F=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
+          R=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+          BASE="setpts=PTS-STARTPTS,scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,drawbox=x=0:y=0:w=1280:h=102:color=black@0.82:t=fill"
+          ffmpeg -y -v error -ss 0 -t 80.12 -i work/old-source.mp4 -filter_complex "[0:v]$BASE,drawtext=fontfile=$F:text='MAR 9 2020 | SATELLITE 2020':x=34:y=15:fontsize=34:fontcolor=white,drawtext=fontfile=$R:text='Original event | X-hosted repost @MarioNawfal':x=34:y=61:fontsize=21:fontcolor=white[v];[0:a]asetpts=PTS-STARTPTS,loudnorm=I=-16:TP=-1.5:LRA=11[a]" -map '[v]' -map '[a]' -r 30 -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -ar 48000 -b:a 160k output/01-then.mp4
+          ffmpeg -y -v error -ss 648.41 -t 42.17 -i work/new-source.mp4 -filter_complex "[0:v]$BASE,drawtext=fontfile=$F:text='AUG 11 2026 | SPACEX ALL-HANDS':x=34:y=15:fontsize=34:fontcolor=white,drawtext=fontfile=$R:text='Official @SpaceX video | majority / over 90 percent claim':x=34:y=61:fontsize=21:fontcolor=white[v];[0:a]asetpts=PTS-STARTPTS,loudnorm=I=-16:TP=-1.5:LRA=11[a]" -map '[v]' -map '[a]' -r 30 -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -ar 48000 -b:a 160k output/02-now.mp4
+          ffmpeg -y -v error -f lavfi -i 'color=c=0x0b0b0d:s=1280x720:r=30:d=2' -f lavfi -i 'anullsrc=r=48000:cl=stereo:d=2' -vf "drawtext=fontfile=$F:text='STARLINK: THEN -> NOW':x=(w-text_w)/2:y=292:fontsize=58:fontcolor=white,drawtext=fontfile=$R:text='Elon Musk | 2020 vs 2026':x=(w-text_w)/2:y=375:fontsize=28:fontcolor=white" -shortest -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -ar 48000 -b:a 160k output/00-title.mp4
+          ffmpeg -y -v error -f lavfi -i 'color=c=0x0b0b0d:s=1280x720:r=30:d=1.2' -f lavfi -i 'anullsrc=r=48000:cl=stereo:d=1.2' -vf "drawtext=fontfile=$F:text='SIX YEARS LATER':x=(w-text_w)/2:y=320:fontsize=52:fontcolor=white" -shortest -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -ar 48000 -b:a 160k output/transition.mp4
+          printf "file '%s'\n" "$PWD/output/00-title.mp4" "$PWD/output/01-then.mp4" "$PWD/output/transition.mp4" "$PWD/output/02-now.mp4" > output/concat.txt
+          ffmpeg -y -v error -f concat -safe 0 -i output/concat.txt -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -ar 48000 -b:a 160k -movflags +faststart .gemini-bridge/jobs/starlink-then-now-final.mp4
+      - name: Commit staged media to PR branch
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .gemini-bridge/jobs/starlink-then-now-final.mp4
+          git commit -m 'stage Starlink montage for Gemini review'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
