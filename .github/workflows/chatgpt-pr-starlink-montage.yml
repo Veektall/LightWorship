@@ -8,7 +8,7 @@ jobs:
   build-montage:
     if: startsWith(github.event.pull_request.title, 'chatgpt-starlink-montage')
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Install tools
@@ -16,86 +16,54 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y -qq ffmpeg fonts-dejavu-core
-          python3 -m pip install -q --upgrade pip 'yt-dlp[default,curl-cffi]' faster-whisper
-      - name: Pull X video sources fast
+          python3 -m pip install -q --upgrade pip 'yt-dlp[default,curl-cffi]'
+      - name: Pull verified X video sources
         run: |
           set -euo pipefail
           mkdir -p work output
           yt-dlp --no-playlist --impersonate chrome -f 'best[height<=360]/worst' -o 'work/old.%(ext)s' 'https://x.com/MarioNawfal/status/1941774116249313693'
           yt-dlp --no-playlist --impersonate chrome -f 'best[height<=360]/worst' -o 'work/new.%(ext)s' 'https://x.com/SpaceX/status/2087283977866379361'
-          OLD="$(find work -maxdepth 1 -type f -name 'old.*' | head -n1)"; NEW="$(find work -maxdepth 1 -type f -name 'new.*' | head -n1)"
+          OLD="$(find work -maxdepth 1 -type f -name 'old.*' | head -n1)"
+          NEW="$(find work -maxdepth 1 -type f -name 'new.*' | head -n1)"
           test -n "$OLD" && test -n "$NEW"
           ffmpeg -y -v error -i "$OLD" -map 0:v:0 -map 0:a:0? -c copy work/old-source.mp4
           ffmpeg -y -v error -i "$NEW" -map 0:v:0 -map 0:a:0? -c copy work/new-source.mp4
-      - name: Locate spoken claims
+      - name: Render corrected source-dated montage
         run: |
           set -euo pipefail
-          ffmpeg -y -v error -i work/old-source.mp4 -vn -ac 1 -ar 16000 work/old.wav
-          ffmpeg -y -v error -i work/new-source.mp4 -vn -ac 1 -ar 16000 work/new.wav
-          python3 - <<'PY'
-          import json,re
-          from pathlib import Path
-          from faster_whisper import WhisperModel
-          m=WhisperModel('tiny.en',device='cpu',compute_type='int8')
-          def tr(p,o):
-              segs,info=m.transcribe(p,beam_size=3,vad_filter=True)
-              r=[{'start':float(s.start),'end':float(s.end),'text':s.text.strip()} for s in segs]
-              Path(o).write_text(json.dumps({'language':info.language,'segments':r},indent=2),encoding='utf-8'); return r
-          old=tr('work/old.wav','output/old-transcript.json'); new=tr('work/new.wav','output/new-transcript.json')
-          def locate(rows,kind):
-              best=(-1,0,'')
-              for i in range(len(rows)):
-                  t=' '.join(x['text'] for x in rows[max(0,i-4):min(len(rows),i+5)]).lower(); s=0
-                  if kind=='old':
-                      if 'threat' in t and ('telco' in t or 'telecom' in t): s+=30
-                      if 'hardest' in t and ('reach' in t or 'serve' in t): s+=20
-                      if 'percent' in t and ('three' in t or '3' in t): s+=10
-                  else:
-                      if 'ninety' in t or re.search(r'\b90\b',t): s+=40
-                      if 'internet traffic' in t: s+=25
-                      if 'majority' in t and 'internet' in t: s+=12
-                  if s>best[0]: best=(s,i,t)
-              s,i,t=best
-              if s < (15 if kind=='old' else 25): raise SystemExit(f'Could not locate {kind} claim; best={best}')
-              if kind=='old':
-                  st=0.0
-                  en=min(rows[-1]['end'],82.0)
-              else:
-                  # Center the cut tightly around the 90% sentence, retaining the preceding majority sentence.
-                  ninety=next((j for j,x in enumerate(rows) if ('ninety' in x['text'].lower() or re.search(r'\b90\b',x['text'].lower()))),i)
-                  st=max(0,rows[max(0,ninety-3)]['start']-4)
-                  en=min(rows[-1]['end'],rows[min(len(rows)-1,ninety+3)]['end']+5)
-              return {'start':st,'duration':en-st,'score':s,'context':t}
-          cuts={'old':locate(old,'old'),'new':locate(new,'new')}
-          Path('output/cuts.json').write_text(json.dumps(cuts,indent=2),encoding='utf-8')
-          Path('work/cuts.env').write_text(f"OLD_START={cuts['old']['start']:.3f}\nOLD_DUR={cuts['old']['duration']:.3f}\nNEW_START={cuts['new']['start']:.3f}\nNEW_DUR={cuts['new']['duration']:.3f}\n")
-          print(json.dumps(cuts,indent=2))
-          PY
-      - name: Render dated montage
-        run: |
-          set -euo pipefail
-          source work/cuts.env
           F=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
           R=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
-          vfbase="setpts=PTS-STARTPTS,scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,drawbox=x=0:y=0:w=1280:h=102:color=black@0.82:t=fill"
-          ffmpeg -y -v error -ss "$OLD_START" -t "$OLD_DUR" -i work/old-source.mp4 \
-            -filter_complex "[0:v]$vfbase,drawtext=fontfile=$F:text='MAR 9 2020 | SATELLITE 2020':x=34:y=15:fontsize=34:fontcolor=white,drawtext=fontfile=$R:text='Original event | X-hosted repost: @MarioNawfal':x=34:y=61:fontsize=21:fontcolor=white[v];[0:a]asetpts=PTS-STARTPTS,loudnorm=I=-16:TP=-1.5:LRA=11[a]" \
+          BASE="setpts=PTS-STARTPTS,scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,drawbox=x=0:y=0:w=1280:h=102:color=black@0.82:t=fill"
+
+          ffmpeg -y -v error -ss 0 -t 80.12 -i work/old-source.mp4 \
+            -filter_complex "[0:v]$BASE,drawtext=fontfile=$F:text='MAR 9 2020 | SATELLITE 2020':x=34:y=15:fontsize=34:fontcolor=white,drawtext=fontfile=$R:text='Original event | X-hosted repost @MarioNawfal':x=34:y=61:fontsize=21:fontcolor=white[v];[0:a]asetpts=PTS-STARTPTS,loudnorm=I=-16:TP=-1.5:LRA=11[a]" \
             -map '[v]' -map '[a]' -r 30 -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -ar 48000 -b:a 160k output/01-then.mp4
-          ffmpeg -y -v error -ss "$NEW_START" -t "$NEW_DUR" -i work/new-source.mp4 \
-            -filter_complex "[0:v]$vfbase,drawtext=fontfile=$F:text='AUG 11 2026 | SPACEX ALL-HANDS':x=34:y=15:fontsize=34:fontcolor=white,drawtext=fontfile=$R:text='Official @SpaceX video | majority / over 90% claim':x=34:y=61:fontsize=21:fontcolor=white[v];[0:a]asetpts=PTS-STARTPTS,loudnorm=I=-16:TP=-1.5:LRA=11[a]" \
+
+          ffmpeg -y -v error -ss 648.41 -t 42.17 -i work/new-source.mp4 \
+            -filter_complex "[0:v]$BASE,drawtext=fontfile=$F:text='AUG 11 2026 | SPACEX ALL-HANDS':x=34:y=15:fontsize=34:fontcolor=white,drawtext=fontfile=$R:text='Official @SpaceX video | majority / over 90 percent claim':x=34:y=61:fontsize=21:fontcolor=white[v];[0:a]asetpts=PTS-STARTPTS,loudnorm=I=-16:TP=-1.5:LRA=11[a]" \
             -map '[v]' -map '[a]' -r 30 -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -ar 48000 -b:a 160k output/02-now.mp4
-          ffmpeg -y -v error -f lavfi -i 'color=c=0x0b0b0d:s=1280x720:r=30:d=2' -f lavfi -i 'anullsrc=r=48000:cl=stereo:d=2' -vf "drawtext=fontfile=$F:text='STARLINK: THEN -> NOW':x=(w-text_w)/2:y=292:fontsize=58:fontcolor=white,drawtext=fontfile=$R:text='Elon Musk | 2020 vs 2026':x=(w-text_w)/2:y=375:fontsize=28:fontcolor=white" -shortest -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -ar 48000 -b:a 160k output/00-title.mp4
-          ffmpeg -y -v error -f lavfi -i 'color=c=0x0b0d:s=1280x720:r=30:d=1.2' -f lavfi -i 'anullsrc=r=48000:cl=stereo:d=1.2' -vf "drawtext=fontfile=$F:text='SIX YEARS LATER':x=(w-text_w)/2:y=320:fontsize=52:fontcolor=white" -shortest -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -ar 48000 -b:a 160k output/transition.mp4
+
+          ffmpeg -y -v error -f lavfi -i 'color=c=0x0b0b0d:s=1280x720:r=30:d=2' -f lavfi -i 'anullsrc=r=48000:cl=stereo:d=2' \
+            -vf "drawtext=fontfile=$F:text='STARLINK: THEN -> NOW':x=(w-text_w)/2:y=292:fontsize=58:fontcolor=white,drawtext=fontfile=$R:text='Elon Musk | 2020 vs 2026':x=(w-text_w)/2:y=375:fontsize=28:fontcolor=white" \
+            -shortest -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -ar 48000 -b:a 160k output/00-title.mp4
+
+          ffmpeg -y -v error -f lavfi -i 'color=c=0x0b0b0d:s=1280x720:r=30:d=1.2' -f lavfi -i 'anullsrc=r=48000:cl=stereo:d=1.2' \
+            -vf "drawtext=fontfile=$F:text='SIX YEARS LATER':x=(w-text_w)/2:y=320:fontsize=52:fontcolor=white" \
+            -shortest -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -ar 48000 -b:a 160k output/transition.mp4
+
           printf "file '%s'\n" "$PWD/output/00-title.mp4" "$PWD/output/01-then.mp4" "$PWD/output/transition.mp4" "$PWD/output/02-now.mp4" > output/concat.txt
           ffmpeg -y -v error -f concat -safe 0 -i output/concat.txt -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -ar 48000 -b:a 160k -movflags +faststart output/starlink-then-now.mp4
+
           cat > output/SOURCES.txt <<'EOF'
           STARLINK: THEN -> NOW
-          THEN: SATELLITE 2020, March 9, 2020. X-hosted repost used for acquisition: https://x.com/MarioNawfal/status/1941774116249313693 (repost July 6, 2025).
+          THEN: SATELLITE 2020, March 9, 2020. X-hosted repost used for media acquisition: https://x.com/MarioNawfal/status/1941774116249313693 (repost July 6, 2025).
           NOW: Official @SpaceX All-Hands video posted August 11, 2026: https://x.com/SpaceX/status/2087283977866379361.
-          The older clip contains Musk saying Starlink is not a huge threat to telcos, will help telcos, and will serve the 3–4% hardest-to-reach customers. The newer clip contains Musk saying Starlink will probably do the majority of the Internet and may end up doing over 90% of all Internet traffic.
-          Spoken phrases were located by automatic transcription. No synthetic voice or invented dialogue is used. Date stamps are burned into the footage. Clip timestamps are reset before concatenation to avoid HLS discontinuities.
+          2020 verified excerpt: 00:00.00–01:20.12 of the reposted excerpt, containing the 'not a huge threat to telcos', helpful-to-telcos, and hardest-to-reach discussion.
+          2026 verified excerpt: 10:48.41–11:30.58 of the official all-hands video, containing the majority and over-90-percent Internet traffic statements.
+          No synthetic voice or invented dialogue is used. Dates and source labels are burned into the footage. Timestamps are reset before concatenation.
           EOF
-          for f in output/01-then.mp4 output/02-now.mp4 output/starlink-then-now.mp4; do ffprobe -v error -show_entries format=duration -of default=nw=1 "$f"; done > output/durations.txt
+
+          for f in output/01-then.mp4 output/02-now.mp4 output/starlink-then-now.mp4; do echo "$f"; ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$f"; done > output/durations.txt
           ffprobe -v error -show_format -show_streams -of json output/starlink-then-now.mp4 > output/final-ffprobe.json
           sha256sum output/starlink-then-now.mp4 > output/SHA256SUMS.txt
       - name: Upload montage
@@ -107,9 +75,6 @@ jobs:
             output/01-then.mp4
             output/02-now.mp4
             output/SOURCES.txt
-            output/cuts.json
-            output/old-transcript.json
-            output/new-transcript.json
             output/durations.txt
             output/final-ffprobe.json
             output/SHA256SUMS.txt
