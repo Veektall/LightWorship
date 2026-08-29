@@ -27,8 +27,6 @@ jobs:
           test -n "$OLD" && test -n "$NEW"
           ffmpeg -y -v error -i "$OLD" -map 0:v:0 -map 0:a:0? -c copy work/old-source.mp4
           ffmpeg -y -v error -i "$NEW" -map 0:v:0 -map 0:a:0? -c copy work/new-source.mp4
-          ffprobe -v error -show_format -show_streams -of json work/old-source.mp4 > output/old-source-ffprobe.json
-          ffprobe -v error -show_format -show_streams -of json work/new-source.mp4 > output/new-source-ffprobe.json
       - name: Locate spoken claims
         run: |
           set -euo pipefail
@@ -58,11 +56,15 @@ jobs:
                       if 'majority' in t and 'internet' in t: s+=12
                   if s>best[0]: best=(s,i,t)
               s,i,t=best
-              threshold=15 if kind=='old' else 25
-              if s<threshold: raise SystemExit(f'Could not locate {kind} claim; best={best}')
-              st=max(0,rows[max(0,i-2)]['start']-5)
-              dur=65 if kind=='old' else 42
-              en=min(rows[-1]['end'],st+dur)
+              if s < (15 if kind=='old' else 25): raise SystemExit(f'Could not locate {kind} claim; best={best}')
+              if kind=='old':
+                  st=0.0
+                  en=min(rows[-1]['end'],82.0)
+              else:
+                  # Center the cut tightly around the 90% sentence, retaining the preceding majority sentence.
+                  ninety=next((j for j,x in enumerate(rows) if ('ninety' in x['text'].lower() or re.search(r'\b90\b',x['text'].lower()))),i)
+                  st=max(0,rows[max(0,ninety-3)]['start']-4)
+                  en=min(rows[-1]['end'],rows[min(len(rows)-1,ninety+3)]['end']+5)
               return {'start':st,'duration':en-st,'score':s,'context':t}
           cuts={'old':locate(old,'old'),'new':locate(new,'new')}
           Path('output/cuts.json').write_text(json.dumps(cuts,indent=2),encoding='utf-8')
@@ -75,20 +77,25 @@ jobs:
           source work/cuts.env
           F=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
           R=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
-          common="scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,drawbox=x=0:y=0:w=1280:h=102:color=black@0.82:t=fill"
-          ffmpeg -y -v error -ss "$OLD_START" -t "$OLD_DUR" -i work/old-source.mp4 -vf "$common,drawtext=fontfile=$F:text='MAR 9 2020 | SATELLITE 2020':x=34:y=15:fontsize=34:fontcolor=white,drawtext=fontfile=$R:text='Original event | X-hosted repost: @MarioNawfal':x=34:y=61:fontsize=21:fontcolor=white" -af 'loudnorm=I=-16:TP=-1.5:LRA=11' -r 30 -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -b:a 160k output/01-then.mp4
-          ffmpeg -y -v error -ss "$NEW_START" -t "$NEW_DUR" -i work/new-source.mp4 -vf "$common,drawtext=fontfile=$F:text='AUG 11 2026 | SPACEX ALL-HANDS':x=34:y=15:fontsize=34:fontcolor=white,drawtext=fontfile=$R:text='Official @SpaceX video | majority / over 90% claim':x=34:y=61:fontsize=21:fontcolor=white" -af 'loudnorm=I=-16:TP=-1.5:LRA=11' -r 30 -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -b:a 160k output/02-now.mp4
-          ffmpeg -y -v error -f lavfi -i 'color=c=0x0b0b0d:s=1280x720:r=30:d=2' -f lavfi -i 'anullsrc=r=48000:cl=stereo:d=2' -vf "drawtext=fontfile=$F:text='STARLINK: THEN -> NOW':x=(w-text_w)/2:y=292:fontsize=58:fontcolor=white,drawtext=fontfile=$R:text='Elon Musk | 2020 vs 2026':x=(w-text_w)/2:y=375:fontsize=28:fontcolor=white" -shortest -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -b:a 160k output/00-title.mp4
-          ffmpeg -y -v error -f lavfi -i 'color=c=0x0b0b0d:s=1280x720:r=30:d=1.2' -f lavfi -i 'anullsrc=r=48000:cl=stereo:d=1.2' -vf "drawtext=fontfile=$F:text='SIX YEARS LATER':x=(w-text_w)/2:y=320:fontsize=52:fontcolor=white" -shortest -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -b:a 160k output/transition.mp4
+          vfbase="setpts=PTS-STARTPTS,scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2:black,drawbox=x=0:y=0:w=1280:h=102:color=black@0.82:t=fill"
+          ffmpeg -y -v error -ss "$OLD_START" -t "$OLD_DUR" -i work/old-source.mp4 \
+            -filter_complex "[0:v]$vfbase,drawtext=fontfile=$F:text='MAR 9 2020 | SATELLITE 2020':x=34:y=15:fontsize=34:fontcolor=white,drawtext=fontfile=$R:text='Original event | X-hosted repost: @MarioNawfal':x=34:y=61:fontsize=21:fontcolor=white[v];[0:a]asetpts=PTS-STARTPTS,loudnorm=I=-16:TP=-1.5:LRA=11[a]" \
+            -map '[v]' -map '[a]' -r 30 -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -ar 48000 -b:a 160k output/01-then.mp4
+          ffmpeg -y -v error -ss "$NEW_START" -t "$NEW_DUR" -i work/new-source.mp4 \
+            -filter_complex "[0:v]$vfbase,drawtext=fontfile=$F:text='AUG 11 2026 | SPACEX ALL-HANDS':x=34:y=15:fontsize=34:fontcolor=white,drawtext=fontfile=$R:text='Official @SpaceX video | majority / over 90% claim':x=34:y=61:fontsize=21:fontcolor=white[v];[0:a]asetpts=PTS-STARTPTS,loudnorm=I=-16:TP=-1.5:LRA=11[a]" \
+            -map '[v]' -map '[a]' -r 30 -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -ar 48000 -b:a 160k output/02-now.mp4
+          ffmpeg -y -v error -f lavfi -i 'color=c=0x0b0b0d:s=1280x720:r=30:d=2' -f lavfi -i 'anullsrc=r=48000:cl=stereo:d=2' -vf "drawtext=fontfile=$F:text='STARLINK: THEN -> NOW':x=(w-text_w)/2:y=292:fontsize=58:fontcolor=white,drawtext=fontfile=$R:text='Elon Musk | 2020 vs 2026':x=(w-text_w)/2:y=375:fontsize=28:fontcolor=white" -shortest -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -ar 48000 -b:a 160k output/00-title.mp4
+          ffmpeg -y -v error -f lavfi -i 'color=c=0x0b0d:s=1280x720:r=30:d=1.2' -f lavfi -i 'anullsrc=r=48000:cl=stereo:d=1.2' -vf "drawtext=fontfile=$F:text='SIX YEARS LATER':x=(w-text_w)/2:y=320:fontsize=52:fontcolor=white" -shortest -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -ar 48000 -b:a 160k output/transition.mp4
           printf "file '%s'\n" "$PWD/output/00-title.mp4" "$PWD/output/01-then.mp4" "$PWD/output/transition.mp4" "$PWD/output/02-now.mp4" > output/concat.txt
-          ffmpeg -y -v error -f concat -safe 0 -i output/concat.txt -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -b:a 160k -movflags +faststart output/starlink-then-now.mp4
+          ffmpeg -y -v error -f concat -safe 0 -i output/concat.txt -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -c:a aac -ar 48000 -b:a 160k -movflags +faststart output/starlink-then-now.mp4
           cat > output/SOURCES.txt <<'EOF'
           STARLINK: THEN -> NOW
           THEN: SATELLITE 2020, March 9, 2020. X-hosted repost used for acquisition: https://x.com/MarioNawfal/status/1941774116249313693 (repost July 6, 2025).
           NOW: Official @SpaceX All-Hands video posted August 11, 2026: https://x.com/SpaceX/status/2087283977866379361.
-          The older clip contains Musk saying Starlink is not a huge threat to telcos and targets the hardest-to-reach few percent. The newer clip contains Musk saying Starlink will probably do the majority of the Internet and may end up doing over 90% of all Internet traffic.
-          Spoken phrases were located by automatic transcription. No synthetic voice or invented dialogue is used. Date stamps are burned into the footage.
+          The older clip contains Musk saying Starlink is not a huge threat to telcos, will help telcos, and will serve the 3–4% hardest-to-reach customers. The newer clip contains Musk saying Starlink will probably do the majority of the Internet and may end up doing over 90% of all Internet traffic.
+          Spoken phrases were located by automatic transcription. No synthetic voice or invented dialogue is used. Date stamps are burned into the footage. Clip timestamps are reset before concatenation to avoid HLS discontinuities.
           EOF
+          for f in output/01-then.mp4 output/02-now.mp4 output/starlink-then-now.mp4; do ffprobe -v error -show_entries format=duration -of default=nw=1 "$f"; done > output/durations.txt
           ffprobe -v error -show_format -show_streams -of json output/starlink-then-now.mp4 > output/final-ffprobe.json
           sha256sum output/starlink-then-now.mp4 > output/SHA256SUMS.txt
       - name: Upload montage
@@ -97,10 +104,13 @@ jobs:
           name: chatgpt-starlink-montage-${{ github.run_id }}
           path: |
             output/starlink-then-now.mp4
+            output/01-then.mp4
+            output/02-now.mp4
             output/SOURCES.txt
             output/cuts.json
             output/old-transcript.json
             output/new-transcript.json
+            output/durations.txt
             output/final-ffprobe.json
             output/SHA256SUMS.txt
           if-no-files-found: error
