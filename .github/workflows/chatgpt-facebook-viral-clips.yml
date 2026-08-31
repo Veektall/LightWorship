@@ -1,0 +1,198 @@
+name: ChatGPT Facebook Viral Clips Pipeline
+
+on:
+  push:
+    paths:
+      - '.clip-jobs/requests/*.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Find request
+        id: req
+        shell: bash
+        run: |
+          set -euo pipefail
+          REQ="$(git diff-tree --no-commit-id --name-only -r "$GITHUB_SHA" | grep '^.clip-jobs/requests/.*\.json$' | head -n1 || true)"
+          if [ -z "$REQ" ]; then
+            REQ="$(find .clip-jobs/requests -maxdepth 1 -type f -name '*.json' | sort | tail -n1)"
+          fi
+          test -s "$REQ"
+          JOB_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["job_id"])' "$REQ")"
+          URL="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["url"])' "$REQ")"
+          echo "request=$REQ" >> "$GITHUB_OUTPUT"
+          echo "job_id=$JOB_ID" >> "$GITHUB_OUTPUT"
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Install media tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --upgrade 'yt-dlp[default,curl-cffi]' fdown-api webvtt-py faster-whisper
+
+      - name: Resolve, download and verify exact source
+        env:
+          URL: ${{ steps.req.outputs.url }}
+          JOB_ID: ${{ steps.req.outputs.job_id }}
+        shell: bash
+        run: |
+          set -u
+          mkdir -p "work/$JOB_ID" "out/$JOB_ID"
+          LOG="out/$JOB_ID/download.log"
+          : > "$LOG"
+          ok=0
+
+          echo '=== yt-dlp normal ===' >> "$LOG"
+          if yt-dlp --no-playlist --merge-output-format mp4 -f 'bv*+ba/b' -o "work/$JOB_ID/source.%(ext)s" "$URL" >>"$LOG" 2>&1; then ok=1; fi
+
+          if [ "$ok" -eq 0 ]; then
+            rm -f "work/$JOB_ID"/source.*
+            echo '=== yt-dlp impersonate chrome ===' >> "$LOG"
+            if yt-dlp --impersonate chrome --no-playlist --merge-output-format mp4 -f 'bv*+ba/b' -o "work/$JOB_ID/source.%(ext)s" "$URL" >>"$LOG" 2>&1; then ok=1; fi
+          fi
+
+          if [ "$ok" -eq 0 ]; then
+            rm -f "work/$JOB_ID"/source.*
+            echo '=== fdown-api ===' >> "$LOG"
+            if python3 - <<'PY' >>"$LOG" 2>&1
+import os
+from fdown_api import Fdown
+url=os.environ['URL']; job=os.environ['JOB_ID']
+f=Fdown(timeout=90)
+links=f.get_links(url)
+quality='best' if getattr(links,'hdlink',None) else 'normal'
+f.download_video(links, quality=quality, filename='source.mp4', dir=f'work/{job}', progress_bar=False, quiet=True)
+PY
+            then ok=1; fi
+          fi
+
+          SRC="$(find "work/$JOB_ID" -maxdepth 1 -type f \( -name 'source.mp4' -o -name 'source.webm' -o -name 'source.mkv' -o -name 'source.mov' \) | head -n1 || true)"
+          if [ "$ok" -eq 0 ] || [ -z "$SRC" ] || [ ! -s "$SRC" ]; then
+            echo 'All public download methods failed.' >&2
+            cat "$LOG" >&2
+            exit 21
+          fi
+
+          if [ "${SRC##*.}" != "mp4" ]; then
+            ffmpeg -y -v error -i "$SRC" -map 0 -c copy "work/$JOB_ID/source.mp4" || ffmpeg -y -v error -i "$SRC" -c:v libx264 -preset veryfast -crf 18 -c:a aac -b:a 192k "work/$JOB_ID/source.mp4"
+          elif [ "$SRC" != "work/$JOB_ID/source.mp4" ]; then
+            mv "$SRC" "work/$JOB_ID/source.mp4"
+          fi
+
+          ffprobe -v error -show_format -show_streams -of json "work/$JOB_ID/source.mp4" > "out/$JOB_ID/ffprobe.json"
+          ffmpeg -v error -i "work/$JOB_ID/source.mp4" -map 0:v:0 -f null - >/dev/null 2>"out/$JOB_ID/decode-errors.txt" || true
+          sha256sum "work/$JOB_ID/source.mp4" > "out/$JOB_ID/SHA256SUMS.txt"
+          test -s "out/$JOB_ID/ffprobe.json"
+
+      - name: Fetch captions first, Whisper only if needed
+        env:
+          URL: ${{ steps.req.outputs.url }}
+          JOB_ID: ${{ steps.req.outputs.job_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "work/$JOB_ID/captions"
+          set +e
+          yt-dlp --skip-download --write-subs --write-auto-subs --sub-langs 'en.*,en' --sub-format 'vtt/best' -o "work/$JOB_ID/captions/caption.%(ext)s" "$URL" >"out/$JOB_ID/caption-fetch.log" 2>&1
+          set -e
+          VTT="$(find "work/$JOB_ID/captions" -type f -name '*.vtt' | head -n1 || true)"
+          if [ -n "$VTT" ] && [ -s "$VTT" ]; then
+            cp "$VTT" "out/$JOB_ID/platform-caption.vtt"
+            python3 - <<'PY'
+import os, re, webvtt
+job=os.environ['JOB_ID']; p=f'out/{job}/platform-caption.vtt'
+seen=set(); lines=[]
+for c in webvtt.read(p):
+    t=re.sub(r'<[^>]+>','',c.text).replace('\n',' ').strip()
+    t=re.sub(r'\s+',' ',t)
+    if not t or (c.start,c.end,t) in seen: continue
+    seen.add((c.start,c.end,t)); lines.append(f'[{c.start} --> {c.end}] {t}')
+open(f'out/{job}/transcript.txt','w',encoding='utf-8').write('\n'.join(lines)+'\n')
+open(f'out/{job}/transcript-source.txt','w').write('platform-caption\n')
+PY
+          else
+            ffmpeg -y -v error -i "work/$JOB_ID/source.mp4" -vn -ac 1 -ar 16000 "work/$JOB_ID/audio.wav"
+            python3 - <<'PY'
+import os
+from faster_whisper import WhisperModel
+job=os.environ['JOB_ID']
+model=WhisperModel('small.en', device='cpu', compute_type='int8')
+segments, info=model.transcribe(f'work/{job}/audio.wav', vad_filter=True, beam_size=5)
+def ts(s):
+    h=int(s//3600); s-=h*3600; m=int(s//60); s-=m*60
+    return f'{h:02d}:{m:02d}:{s:06.3f}'
+with open(f'out/{job}/transcript.txt','w',encoding='utf-8') as f:
+    for seg in segments:
+        text=' '.join(seg.text.split())
+        if text: f.write(f'[{ts(seg.start)} --> {ts(seg.end)}] {text}\n')
+open(f'out/{job}/transcript-source.txt','w').write('faster-whisper-small.en\n')
+PY
+          fi
+          test -s "out/$JOB_ID/transcript.txt"
+
+      - name: Build manifest
+        env:
+          JOB_ID: ${{ steps.req.outputs.job_id }}
+          URL: ${{ steps.req.outputs.url }}
+        run: |
+          python3 - <<'PY'
+import json, os, subprocess, pathlib, hashlib
+j=os.environ['JOB_ID']; url=os.environ['URL']
+probe=json.load(open(f'out/{j}/ffprobe.json'))
+fmt=probe.get('format',{})
+manifest={
+ 'job_id': j,
+ 'source_url': url,
+ 'duration_seconds': float(fmt.get('duration') or 0),
+ 'size_bytes': int(fmt.get('size') or 0),
+ 'format_name': fmt.get('format_name'),
+ 'transcript_source': open(f'out/{j}/transcript-source.txt').read().strip(),
+ 'source_sha256': open(f'out/{j}/SHA256SUMS.txt').read().split()[0],
+ 'workflow_run_id': os.environ.get('GITHUB_RUN_ID')
+}
+pathlib.Path(f'out/{j}/manifest.json').write_text(json.dumps(manifest,indent=2),encoding='utf-8')
+PY
+
+      - name: Upload verified source artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-${{ steps.req.outputs.job_id }}
+          path: |
+            work/${{ steps.req.outputs.job_id }}/source.mp4
+            out/${{ steps.req.outputs.job_id }}/ffprobe.json
+            out/${{ steps.req.outputs.job_id }}/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
+      - name: Commit transcript and verification report
+        env:
+          JOB_ID: ${{ steps.req.outputs.job_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ".clip-jobs/results/$JOB_ID"
+          cp "out/$JOB_ID/transcript.txt" ".clip-jobs/results/$JOB_ID/transcript.txt"
+          cp "out/$JOB_ID/transcript-source.txt" ".clip-jobs/results/$JOB_ID/transcript-source.txt"
+          cp "out/$JOB_ID/manifest.json" ".clip-jobs/results/$JOB_ID/manifest.json"
+          cp "out/$JOB_ID/ffprobe.json" ".clip-jobs/results/$JOB_ID/ffprobe.json"
+          cp "out/$JOB_ID/SHA256SUMS.txt" ".clip-jobs/results/$JOB_ID/SHA256SUMS.txt"
+          cp "out/$JOB_ID/download.log" ".clip-jobs/results/$JOB_ID/download.log"
+          cp "out/$JOB_ID/caption-fetch.log" ".clip-jobs/results/$JOB_ID/caption-fetch.log" || true
+          git config user.name 'chatgpt-actions'
+          git config user.email 'actions@users.noreply.github.com'
+          git add ".clip-jobs/results/$JOB_ID"
+          git commit -m "Add transcript for $JOB_ID"
+          git push
