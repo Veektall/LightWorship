@@ -1,0 +1,42 @@
+name: Transcribe Facebook reel 1577710583729817
+on:
+  push:
+    branches: [gemini-fb-1577710583729817]
+permissions:
+  contents: write
+jobs:
+  transcribe:
+    if: ${{ !contains(github.event.head_commit.message, '[transcript-done]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gemini-fb-1577710583729817
+          fetch-depth: 1
+      - name: Install transcription tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install -U openai-whisper
+      - name: Transcribe complete audio
+        run: |
+          mkdir -p .gemini-bridge/jobs/transcript-1577710583729817
+          whisper .gemini-bridge/jobs/facebook-reel-1577710583729817.mp4 \
+            --model base.en \
+            --language English \
+            --task transcribe \
+            --output_dir .gemini-bridge/jobs/transcript-1577710583729817 \
+            --output_format all
+          ls -lh .gemini-bridge/jobs/transcript-1577710583729817
+      - uses: actions/upload-artifact@v4
+        with:
+          name: facebook-reel-1577710583729817-transcript
+          path: .gemini-bridge/jobs/transcript-1577710583729817/
+          retention-days: 1
+      - name: Commit transcript
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .gemini-bridge/jobs/transcript-1577710583729817
+          git commit -m '[stage-done][transcript-done] transcribe facebook reel 1577710583729817'
+          git push origin HEAD:gemini-fb-1577710583729817
