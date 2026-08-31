@@ -12,18 +12,29 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: gemini-fb-1577710583729817
-      - name: Install yt-dlp
-        run: python -m pip install -U yt-dlp
-      - name: Download reel
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install -U yt-dlp
+      - name: Download and merge reel
         run: |
           mkdir -p .gemini-bridge/jobs
           yt-dlp --no-playlist --merge-output-format mp4 -f 'bv*+ba/b' -o '.gemini-bridge/jobs/facebook-reel-1577710583729817.%(ext)s' 'https://www.facebook.com/reel/1577710583729817/'
           test -f .gemini-bridge/jobs/facebook-reel-1577710583729817.mp4
+          ffprobe -v error -show_entries format=duration,size -show_streams -of json .gemini-bridge/jobs/facebook-reel-1577710583729817.mp4 > .gemini-bridge/jobs/facebook-reel-1577710583729817.ffprobe.json
           ls -lh .gemini-bridge/jobs/facebook-reel-1577710583729817.mp4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: facebook-reel-1577710583729817
+          path: |
+            .gemini-bridge/jobs/facebook-reel-1577710583729817.mp4
+            .gemini-bridge/jobs/facebook-reel-1577710583729817.ffprobe.json
+          retention-days: 1
       - name: Commit staged media
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .gemini-bridge/jobs/facebook-reel-1577710583729817.mp4
+          git add .gemini-bridge/jobs/facebook-reel-1577710583729817.mp4 .gemini-bridge/jobs/facebook-reel-1577710583729817.ffprobe.json
           git commit -m '[stage-done] stage facebook reel 1577710583729817'
           git push origin HEAD:gemini-fb-1577710583729817
