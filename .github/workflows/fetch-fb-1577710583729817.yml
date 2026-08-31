@@ -1,0 +1,29 @@
+name: Fetch Facebook reel 1577710583729817
+on:
+  push:
+    branches: [gemini-fb-1577710583729817]
+permissions:
+  contents: write
+jobs:
+  fetch:
+    if: ${{ !contains(github.event.head_commit.message, '[stage-done]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gemini-fb-1577710583729817
+      - name: Install yt-dlp
+        run: python -m pip install -U yt-dlp
+      - name: Download reel
+        run: |
+          mkdir -p .gemini-bridge/jobs
+          yt-dlp --no-playlist --merge-output-format mp4 -f 'bv*+ba/b' -o '.gemini-bridge/jobs/facebook-reel-1577710583729817.%(ext)s' 'https://www.facebook.com/reel/1577710583729817/'
+          test -f .gemini-bridge/jobs/facebook-reel-1577710583729817.mp4
+          ls -lh .gemini-bridge/jobs/facebook-reel-1577710583729817.mp4
+      - name: Commit staged media
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .gemini-bridge/jobs/facebook-reel-1577710583729817.mp4
+          git commit -m '[stage-done] stage facebook reel 1577710583729817'
+          git push origin HEAD:gemini-fb-1577710583729817
