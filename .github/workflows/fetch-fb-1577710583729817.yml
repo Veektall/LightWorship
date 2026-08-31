@@ -1,4 +1,4 @@
-name: Fetch Facebook reel 1577710583729817
+name: Fetch and transcribe Facebook reel 1577710583729817
 on:
   push:
     branches: [gemini-fb-1577710583729817]
@@ -12,29 +12,45 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: gemini-fb-1577710583729817
-      - name: Install tools
+      - name: Install media tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg cmake build-essential
           python -m pip install -U yt-dlp
       - name: Download and merge reel
         run: |
           mkdir -p .gemini-bridge/jobs
+          rm -f .gemini-bridge/jobs/facebook-reel-1577710583729817.f* || true
           yt-dlp --no-playlist --merge-output-format mp4 -f 'bv*+ba/b' -o '.gemini-bridge/jobs/facebook-reel-1577710583729817.%(ext)s' 'https://www.facebook.com/reel/1577710583729817/'
           test -f .gemini-bridge/jobs/facebook-reel-1577710583729817.mp4
           ffprobe -v error -show_entries format=duration,size -show_streams -of json .gemini-bridge/jobs/facebook-reel-1577710583729817.mp4 > .gemini-bridge/jobs/facebook-reel-1577710583729817.ffprobe.json
-          ls -lh .gemini-bridge/jobs/facebook-reel-1577710583729817.mp4
+      - name: Build Whisper and transcribe full audio
+        run: |
+          rm -rf /tmp/whisper.cpp
+          git clone --depth 1 https://github.com/ggerganov/whisper.cpp /tmp/whisper.cpp
+          cmake -S /tmp/whisper.cpp -B /tmp/whisper.cpp/build -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON
+          cmake --build /tmp/whisper.cpp/build --config Release -j2
+          bash /tmp/whisper.cpp/models/download-ggml-model.sh base.en
+          ffmpeg -y -i .gemini-bridge/jobs/facebook-reel-1577710583729817.mp4 -vn -ar 16000 -ac 1 -c:a pcm_s16le .gemini-bridge/jobs/facebook-reel-1577710583729817.wav
+          /tmp/whisper.cpp/build/bin/whisper-cli \
+            -m /tmp/whisper.cpp/models/ggml-base.en.bin \
+            -f .gemini-bridge/jobs/facebook-reel-1577710583729817.wav \
+            -otxt -osrt \
+            -of .gemini-bridge/jobs/facebook-reel-1577710583729817-transcript
+          cat .gemini-bridge/jobs/facebook-reel-1577710583729817-transcript.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: facebook-reel-1577710583729817
+          name: facebook-reel-1577710583729817-complete
           path: |
             .gemini-bridge/jobs/facebook-reel-1577710583729817.mp4
             .gemini-bridge/jobs/facebook-reel-1577710583729817.ffprobe.json
+            .gemini-bridge/jobs/facebook-reel-1577710583729817-transcript.txt
+            .gemini-bridge/jobs/facebook-reel-1577710583729817-transcript.srt
           retention-days: 1
-      - name: Commit staged media
+      - name: Commit staged media and transcript
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .gemini-bridge/jobs/facebook-reel-1577710583729817.mp4 .gemini-bridge/jobs/facebook-reel-1577710583729817.ffprobe.json
-          git commit -m '[stage-done] stage facebook reel 1577710583729817'
+          git add .gemini-bridge/jobs/facebook-reel-1577710583729817.mp4 .gemini-bridge/jobs/facebook-reel-1577710583729817.ffprobe.json .gemini-bridge/jobs/facebook-reel-1577710583729817-transcript.txt .gemini-bridge/jobs/facebook-reel-1577710583729817-transcript.srt
+          git commit -m '[stage-done][transcript-done] stage and transcribe facebook reel 1577710583729817'
           git push origin HEAD:gemini-fb-1577710583729817
