@@ -1,0 +1,42 @@
+name: Fetch Facebook share video 1Q3FXgdP6t
+on:
+  push:
+    branches: [gemini-fb-share-1Q3FXgdP6t]
+permissions:
+  contents: write
+jobs:
+  fetch:
+    if: ${{ !contains(github.event.head_commit.message, '[stage-done]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gemini-fb-share-1Q3FXgdP6t
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install -U yt-dlp
+      - name: Resolve and download video
+        run: |
+          mkdir -p .gemini-bridge/jobs
+          yt-dlp --no-playlist --dump-single-json 'https://www.facebook.com/share/v/1Q3FXgdP6t/' > .gemini-bridge/jobs/facebook-share-1Q3FXgdP6t.info.json
+          yt-dlp --no-playlist --merge-output-format mp4 -f 'bv*+ba/b' -o '.gemini-bridge/jobs/facebook-share-1Q3FXgdP6t.%(ext)s' 'https://www.facebook.com/share/v/1Q3FXgdP6t/'
+          test -f .gemini-bridge/jobs/facebook-share-1Q3FXgdP6t.mp4
+          ffprobe -v error -show_entries format=duration,size -show_streams -of json .gemini-bridge/jobs/facebook-share-1Q3FXgdP6t.mp4 > .gemini-bridge/jobs/facebook-share-1Q3FXgdP6t.ffprobe.json
+          ls -lh .gemini-bridge/jobs/facebook-share-1Q3FXgdP6t.mp4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: facebook-share-1Q3FXgdP6t
+          path: |
+            .gemini-bridge/jobs/facebook-share-1Q3FXgdP6t.mp4
+            .gemini-bridge/jobs/facebook-share-1Q3FXgdP6t.info.json
+            .gemini-bridge/jobs/facebook-share-1Q3FXgdP6t.ffprobe.json
+          retention-days: 1
+      - name: Commit staged media
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .gemini-bridge/jobs/facebook-share-1Q3FXgdP6t.mp4 .gemini-bridge/jobs/facebook-share-1Q3FXgdP6t.info.json .gemini-bridge/jobs/facebook-share-1Q3FXgdP6t.ffprobe.json
+          git commit -m '[stage-done] stage facebook share 1Q3FXgdP6t'
+          git push origin HEAD:gemini-fb-share-1Q3FXgdP6t
