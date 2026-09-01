@@ -1,0 +1,47 @@
+name: Transcribe Facebook share 1Q3FXgdP6t
+on:
+  push:
+    branches: [gemini-fb-share-1Q3FXgdP6t]
+permissions:
+  contents: write
+jobs:
+  transcribe:
+    if: ${{ contains(github.event.head_commit.message, '[transcribe]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gemini-fb-share-1Q3FXgdP6t
+      - name: Install transcription tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install -U faster-whisper
+      - name: Transcribe full audio
+        run: |
+          mkdir -p .gemini-bridge/jobs/transcript-1Q3FXgdP6t
+          python - <<'PY'
+          from faster_whisper import WhisperModel
+          from pathlib import Path
+          video='.gemini-bridge/jobs/facebook-share-1Q3FXgdP6t.mp4'
+          out=Path('.gemini-bridge/jobs/transcript-1Q3FXgdP6t')
+          model=WhisperModel('base.en', device='cpu', compute_type='int8')
+          segments, info=model.transcribe(video, language='en', vad_filter=True)
+          segments=list(segments)
+          def ts(x):
+              h=int(x//3600); m=int((x%3600)//60); s=x%60
+              return f'{h:02d}:{m:02d}:{s:06.3f}'.replace('.',',')
+          with open(out/'transcript.txt','w',encoding='utf-8') as f:
+              for s in segments:
+                  f.write(f'[{s.start:7.2f}-{s.end:7.2f}] {s.text.strip()}\n')
+          with open(out/'transcript.srt','w',encoding='utf-8') as f:
+              for i,s in enumerate(segments,1):
+                  f.write(f'{i}\n{ts(s.start)} --> {ts(s.end)}\n{s.text.strip()}\n\n')
+          print('segments',len(segments),'duration',info.duration)
+          PY
+          cat .gemini-bridge/jobs/transcript-1Q3FXgdP6t/transcript.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: facebook-share-1Q3FXgdP6t-transcript
+          path: .gemini-bridge/jobs/transcript-1Q3FXgdP6t/
+          retention-days: 1
