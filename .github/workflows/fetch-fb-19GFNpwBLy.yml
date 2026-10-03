@@ -1,0 +1,36 @@
+name: Fetch Facebook reel 19GFNpwBLy
+on:
+  push:
+    branches: [fb-19GFNpwBLy-20261003]
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip yt-dlp
+      - name: Download Facebook video
+        run: |
+          mkdir -p out
+          yt-dlp --no-playlist --merge-output-format mp4 \
+            --write-info-json \
+            -o 'out/facebook-19GFNpwBLy.%(ext)s' \
+            'https://www.facebook.com/share/r/19GFNpwBLy/'
+          ls -lh out
+      - name: Capture status
+        if: always()
+        run: |
+          find out -maxdepth 1 -type f -printf '%f %s bytes\n' > out/status.txt || true
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: facebook-19GFNpwBLy
+          path: out/
+          if-no-files-found: warn
+          retention-days: 2
