@@ -1,0 +1,103 @@
+name: Rhema Gemini V3 Windows Build
+
+on:
+  push:
+    branches: [rhema-v3-build]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 55
+    steps:
+      - name: Checkout build harness
+        uses: actions/checkout@v5
+
+      - name: Checkout pinned Rhema source
+        shell: pwsh
+        run: |
+          git clone https://github.com/openbezal/rhema.git rhema
+          Set-Location rhema
+          git checkout b9d814ca5cd18cee3bb5eb1b501b5247b9e3e59c
+
+      - name: Download verified V3 patch from project Drive
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path rhema-v3 | Out-Null
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://drive.usercontent.google.com/download?id=1aLM0KB9fa4dPGWY4EbCtIgxBVUxDhw6V&export=download&confirm=t' -OutFile 'rhema-v3/apply_v3.py'
+          if ((Get-Item 'rhema-v3/apply_v3.py').Length -lt 20000) { throw 'V3 patch download was unexpectedly small' }
+
+      - name: Apply V3 transcription and compatibility patches
+        shell: pwsh
+        run: python rhema-v3/apply_v3.py
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.2.21'
+
+      - name: Install frontend dependencies
+        working-directory: rhema
+        run: bun install --frozen-lockfile
+
+      - name: Prepare Bible database and bundle assets
+        working-directory: rhema
+        run: bun run setup:bundle
+
+      - name: Verify frontend
+        working-directory: rhema
+        run: bun run build
+
+      - name: Cargo check
+        working-directory: rhema/src-tauri
+        run: cargo check --target x86_64-pc-windows-msvc
+
+      - name: Pre-build Rust
+        working-directory: rhema/src-tauri
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Build NSIS installer
+        working-directory: rhema
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bunx tauri build --target x86_64-pc-windows-msvc --bundles nsis
+
+      - name: Collect and verify installer
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $setup = Get-ChildItem -Path 'rhema\src-tauri\target\x86_64-pc-windows-msvc\release\bundle\nsis' -Filter '*.exe' -File | Select-Object -First 1
+          if (-not $setup) { throw 'NSIS installer not found' }
+          Copy-Item $setup.FullName 'dist\Rhema-Gemini-0.3.4-V3-Win10-Win11-x64-Setup.exe'
+          $hash = Get-FileHash 'dist\Rhema-Gemini-0.3.4-V3-Win10-Win11-x64-Setup.exe' -Algorithm SHA256
+          "SHA256=$($hash.Hash)" | Set-Content 'dist\SHA256.txt'
+          @'
+          Rhema Gemini 0.3.4 V3
+          - Windows 10/11 x64
+          - Fixes silent captured-audio queue drops
+          - 512-frame STT backlog with explicit drop diagnostics
+          - Strongest-channel microphone downmix to avoid stereo phase cancellation
+          - Deepgram Nova-3 endpointing tuned for continuous sermon speech
+          - Google Gemini 3.5 Live transcription with SMART mode and Bible vocabulary
+          - Blue Scripture built-in theme (Tahoma 52pt)
+          - ONNX/DirectML removed from startup dependency path
+          - Full offline WebView2 installer bundled
+          - VC++ runtime bundled
+          - Standard NSIS uninstaller included
+          '@ | Set-Content 'dist\README.txt'
+
+      - name: Upload Windows V3 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rhema-gemini-v3-windows-x64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
