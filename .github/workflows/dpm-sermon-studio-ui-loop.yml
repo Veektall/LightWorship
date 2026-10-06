@@ -1,0 +1,97 @@
+name: Android UI closed loop
+
+on:
+  pull_request:
+    paths:
+      - 'dpm-sermon-studio-ui-loop/**'
+      - 'dpm-source.part-*'
+      - 'dpm-overrides/**'
+      - '.github/workflows/dpm-sermon-studio-ui-loop.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: dpm-ui-loop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host-screenshots:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Extract UI shell source
+        run: |
+          rm -rf dpm-sermon-studio-ui-loop
+          mkdir -p dpm-sermon-studio-ui-loop
+          cat dpm-source.part-* > /tmp/dpm-sermon-studio-ui-loop-source.zip
+          unzip -q /tmp/dpm-sermon-studio-ui-loop-source.zip -d dpm-sermon-studio-ui-loop
+          cp -R dpm-overrides/. dpm-sermon-studio-ui-loop/
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: '9.4.1'
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses >/dev/null || true
+      - name: Install SDK 36
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools'
+      - name: Build and create screenshot baselines
+        working-directory: dpm-sermon-studio-ui-loop
+        run: gradle :app:assembleDebug :app:updateDebugScreenshotTest :app:validateDebugScreenshotTest --stacktrace
+      - name: Upload host screenshot report
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: host-screenshot-report
+          path: |
+            dpm-sermon-studio-ui-loop/app/src/screenshotTestDebug/reference
+            dpm-sermon-studio-ui-loop/app/build/reports/screenshotTest
+            dpm-sermon-studio-ui-loop/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: warn
+
+  emulator-flow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Extract UI shell source
+        run: |
+          rm -rf dpm-sermon-studio-ui-loop
+          mkdir -p dpm-sermon-studio-ui-loop
+          cat dpm-source.part-* > /tmp/dpm-sermon-studio-ui-loop-source.zip
+          unzip -q /tmp/dpm-sermon-studio-ui-loop-source.zip -d dpm-sermon-studio-ui-loop
+          cp -R dpm-overrides/. dpm-sermon-studio-ui-loop/
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: '9.4.1'
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          working-directory: dpm-sermon-studio-ui-loop
+          script: ./scripts/capture-emulator-artifacts.sh artifacts/emulator
+      - name: Upload emulator screenshots, video and logs
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: emulator-ui-artifacts
+          path: |
+            dpm-sermon-studio-ui-loop/artifacts/emulator
+            dpm-sermon-studio-ui-loop/app/build/reports/androidTests
+            dpm-sermon-studio-ui-loop/app/build/outputs/androidTest-results
+          if-no-files-found: warn
