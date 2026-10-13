@@ -1,0 +1,37 @@
+name: Fetch Facebook video 1Dcp2hXTSF
+on:
+  push:
+    branches: [fb-1Dcp2hXTSF-20261013]
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip yt-dlp
+      - name: Download Facebook video
+        run: |
+          mkdir -p out
+          yt-dlp --no-playlist --merge-output-format mp4 --write-info-json             -o 'out/facebook-1Dcp2hXTSF.%(ext)s'             'https://www.facebook.com/share/v/1Dcp2hXTSF/'
+          ffprobe -v error -show_entries format=duration,size -show_streams -of json out/facebook-1Dcp2hXTSF.mp4 > out/ffprobe.json
+          ls -lh out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: facebook-1Dcp2hXTSF
+          path: out/
+          retention-days: 2
+      - name: Stage media for Gemini
+        run: |
+          mkdir -p .gemini-bridge/jobs
+          cp out/facebook-1Dcp2hXTSF.mp4 .gemini-bridge/jobs/facebook-1Dcp2hXTSF.mp4
+          cp out/facebook-1Dcp2hXTSF.info.json .gemini-bridge/jobs/facebook-1Dcp2hXTSF.info.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .gemini-bridge/jobs/facebook-1Dcp2hXTSF.mp4 .gemini-bridge/jobs/facebook-1Dcp2hXTSF.info.json
+          git commit -m '[stage-done] stage facebook video 1Dcp2hXTSF' || exit 0
+          git push origin HEAD:fb-1Dcp2hXTSF-20261013
