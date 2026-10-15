@@ -1,0 +1,26 @@
+name: Fetch Facebook share 1FKQwReS9C
+on:
+  push:
+    branches: [fb-1FKQwReS9C-20261015]
+  workflow_dispatch:
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip yt-dlp
+      - name: Download Facebook post/video
+        run: |
+          mkdir -p out
+          yt-dlp --no-playlist --merge-output-format mp4 --write-info-json -o 'out/facebook-1FKQwReS9C.%(ext)s' 'https://www.facebook.com/share/1FKQwReS9C/'
+          ffprobe -v error -show_entries format=duration,size -show_streams -of json out/facebook-1FKQwReS9C.mp4 > out/ffprobe.json
+          ls -lh out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: facebook-1FKQwReS9C
+          path: out/
+          retention-days: 2
