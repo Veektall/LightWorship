@@ -1,0 +1,32 @@
+name: Fetch Facebook post image 1FKQwReS9C
+on:
+  push:
+    branches: [fb-1FKQwReS9C-20261015]
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch post image
+        run: |
+          mkdir -p out
+          URL='https://www.facebook.com/100050631191559/posts/1521300269567665/'
+          curl -L -A 'facebookexternalhit/1.1' "$URL" -o out/page.html
+          python - <<'PY'
+          import re,html,pathlib
+          s=pathlib.Path('out/page.html').read_text(errors='ignore')
+          m=re.search(r'<meta property="og:image" content="([^"]+)"',s)
+          if not m: raise SystemExit('no image')
+          u=html.unescape(m.group(1))
+          pathlib.Path('out/image_url.txt').write_text(u)
+          print(u)
+          PY
+          IMG="$(cat out/image_url.txt)"
+          curl -L -A 'facebookexternalhit/1.1' "$IMG" -o out/post-image
+          file out/post-image
+          cp out/post-image out/post-image.jpg || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: facebook-post-image-1FKQwReS9C
+          path: out/
+          retention-days: 2
