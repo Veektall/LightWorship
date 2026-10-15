@@ -1,0 +1,37 @@
+name: Inspect Facebook post 1FKQwReS9C
+on:
+  push:
+    branches: [fb-1FKQwReS9C-20261015]
+  workflow_dispatch:
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch Facebook page variants
+        run: |
+          mkdir -p out
+          URL='https://www.facebook.com/100050631191559/posts/1521300269567665/'
+          curl -L --retry 3 -A 'facebookexternalhit/1.1' "$URL" -o out/externalhit.html || true
+          curl -L --retry 3 -A 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/140 Safari/537.36' "$URL" -o out/browser.html || true
+          python - <<'PY'
+          import re,html,pathlib
+          for p in pathlib.Path('out').glob('*.html'):
+              s=p.read_text(errors='ignore')
+              vals=[]
+              for pat in [
+                r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)',
+                r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\']([^"\']+)',
+                r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)',
+                r'<meta[^>]+name=["\']description["\'][^>]+content=["\']([^"\']+)'
+              ]:
+                  vals += re.findall(pat,s,re.I)
+              pathlib.Path(str(p)+'.meta.txt').write_text('\n'.join(html.unescape(x) for x in vals))
+          PY
+          grep -RniE 'scholar|fund|apply|deadline|master|phd|intern|fellow|grant|university' out/*.html | head -300 > out/grep.txt || true
+          find out -type f -maxdepth 1 -printf '%f %s bytes\n'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: facebook-post-1FKQwReS9C-inspect
+          path: out/
+          retention-days: 2
