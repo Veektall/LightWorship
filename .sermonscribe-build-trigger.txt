@@ -1,0 +1,1 @@
+Trigger Windows 7 launcher build after embedded-source restore fix.

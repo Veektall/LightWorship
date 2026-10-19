@@ -1,0 +1,1 @@
+Trigger after restoring the expected embedded-source path.
