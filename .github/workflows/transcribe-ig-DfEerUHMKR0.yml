@@ -1,0 +1,31 @@
+name: Transcribe Instagram reel DfEerUHMKR0
+on:
+  push:
+    branches: [ig-DfEerUHMKR0-20261029]
+jobs:
+  transcribe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip yt-dlp openai-whisper
+      - name: Download and transcribe
+        run: |
+          mkdir -p out
+          yt-dlp --no-playlist --merge-output-format mp4 \
+            -o 'out/instagram-DfEerUHMKR0.%(ext)s' \
+            'https://www.instagram.com/reel/DfEerUHMKR0/'
+          ffmpeg -y -i out/instagram-DfEerUHMKR0.mp4 -vn -ac 1 -ar 16000 out/audio.wav
+          whisper out/audio.wav --model base --language en --output_dir out --output_format all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: instagram-DfEerUHMKR0-transcript
+          path: |
+            out/audio.txt
+            out/audio.srt
+            out/audio.vtt
+            out/audio.json
+          retention-days: 2
