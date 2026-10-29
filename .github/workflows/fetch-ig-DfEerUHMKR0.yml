@@ -1,0 +1,28 @@
+name: Fetch Instagram reel DfEerUHMKR0
+on:
+  push:
+    branches: [ig-DfEerUHMKR0-20261029]
+  workflow_dispatch:
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+          python -m pip install --upgrade pip yt-dlp
+      - name: Download Instagram reel
+        run: |
+          mkdir -p out
+          yt-dlp --no-playlist --merge-output-format mp4 --write-info-json \
+            -o 'out/instagram-DfEerUHMKR0.%(ext)s' \
+            'https://www.instagram.com/reel/DfEerUHMKR0/'
+          ffmpeg -y -i out/instagram-DfEerUHMKR0.mp4 -vn -ac 1 -ar 16000 out/audio.wav
+          ls -lh out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: instagram-DfEerUHMKR0
+          path: out/
+          retention-days: 2
